@@ -1,0 +1,6 @@
+# Discord Bot Requirements
+# Install with: pip install -r discord-requirements.txt
+
+discord.py>=2.3.2
+httpx>=0.25.0
+python-dotenv>=1.0.0
