@@ -161,3 +161,31 @@
   background: #ccc;
   border-color: #ccc;
 }
+
+/* Contain conversation and force wrapping */
+.chat-interface, .chat-container, .conversation, .messages {
+    max-width: 100%;
+    overflow-x: hidden; /* important: stop children from creating horizontal scroll */
+}
+
+/* Make each message wrap instead of expanding */
+.message, .message-bubble, .chat-message {
+    max-width: calc(100% - 48px); /* leave room for padding/avatar */
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap; /* preserve line breaks but allow wrapping */
+    hyphens: auto;
+    box-sizing: border-box;
+}
+
+/* Prevent media from overflowing */
+.message img, .message video, .message iframe {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* If using flex rows, allow shrinking */
+.message-row, .message-wrapper {
+    min-width: 0; /* allows flex children to shrink instead of overflowing */
+}
