@@ -109,6 +109,9 @@
   border-radius: 6px;
   border: 1px solid #e0e0e0;
   margin-bottom: 20px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .ranking-model {
@@ -122,6 +125,8 @@
   color: #333;
   line-height: 1.6;
   font-size: 14px;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .parsed-ranking {

@@ -50,6 +50,9 @@
   padding: 16px;
   border-radius: 6px;
   border: 1px solid #e0e0e0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .model-name {
@@ -62,4 +65,6 @@
 .response-text {
   color: #333;
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }

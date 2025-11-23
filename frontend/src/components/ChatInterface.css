@@ -9,7 +9,9 @@
 .messages-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
+  max-width: 100%;
 }
 
 .empty-state {
@@ -60,6 +62,8 @@
   line-height: 1.6;
   max-width: 80%;
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .loading-indicator {

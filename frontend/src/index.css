@@ -15,6 +15,24 @@
   box-sizing: border-box;
 }
 
+*, *::before, *::after {
+    box-sizing: inherit;
+}
+
+/* Prevent page horizontal overflow and use consistent box-sizing */
+html, body, #root {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
+/* Ensure app-level container doesn't overflow */
+#root > .app, .App {
+    overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -31,6 +49,9 @@ body {
 /* Global markdown styling */
 .markdown-content {
   padding: 12px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .markdown-content p {
@@ -75,6 +96,8 @@ body {
   border-radius: 4px;
   overflow-x: auto;
   margin: 0 0 12px 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .markdown-content code {
