@@ -59,12 +59,29 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 
 ## Running the Application
 
-**Option 1: Use the start script**
+### Option 1: Docker (Recomandat pentru deployment)
+
+Cel mai simplu mod de a rula aplicația, fără a instala dependențe locale:
+
+```bash
+# Creează fișierul .env cu cheia ta API
+echo "OPENROUTER_API_KEY=sk-or-v1-your-key-here" > .env
+
+# Pornește aplicația
+docker-compose up -d --build
+
+# Accesează http://localhost:23000
+```
+
+Vezi [DOCKER.md](DOCKER.md) pentru instrucțiuni complete de Docker.
+
+### Option 2: Use the start script
+
 ```bash
 ./start.sh
 ```
 
-**Option 2: Run manually**
+### Option 3: Run manually
 
 Terminal 1 (Backend):
 ```bash

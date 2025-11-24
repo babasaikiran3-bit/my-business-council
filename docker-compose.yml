@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  llm-council:
+    container_name: llm-council
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "23000:23000"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      # Mount data directory for persistent storage
+      - ./data:/app/data
+      # Optional: mount .env file if you prefer
+      # - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
