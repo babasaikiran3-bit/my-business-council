@@ -18,57 +18,63 @@ This project was 99% vibe coded as a fun Saturday hack because I wanted to explo
 
 ### 1. Install Dependencies
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
-
-**Backend:**
+**Backend (Node.js/TypeScript):**
 ```bash
-uv sync
+cd server
+npm install
+cd ..
 ```
 
-**Frontend:**
+**Frontend (React/Vite):**
 ```bash
 cd frontend
 npm install
 cd ..
 ```
 
+**Mobile (Flutter) - Optional:**
+```bash
+cd mobile
+flutter pub get
+cd ..
+```
+
 ### 2. Configure API Key
 
-Create a `.env` file in the project root:
+Create a `.env` file in the `server` directory:
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
+PORT=8001
 ```
 
 Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
 
 ### 3. Configure Models (Optional)
 
-Edit `backend/config.py` to customize the council:
+Edit `server/src/config.ts` to customize the council:
 
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+```typescript
+export const config = {
+  councilModels: [
+    'openai/gpt-5.1',
+    'google/gemini-3-pro-preview',
+    'anthropic/claude-sonnet-4.5',
+    'x-ai/grok-4',
+  ],
+  chairmanModel: 'google/gemini-3-pro-preview',
+  // ...
+};
 ```
 
 ## Running the Application
 
-**Option 1: Use the start script**
-```bash
-./start.sh
-```
-
-**Option 2: Run manually**
+### Web Application
 
 Terminal 1 (Backend):
 ```bash
-uv run python -m backend.main
+cd server
+npm run dev
 ```
 
 Terminal 2 (Frontend):
@@ -79,9 +85,41 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+### Mobile Application (Flutter)
+
+Make sure the backend server is running, then:
+
+```bash
+cd mobile
+flutter run
+```
+
+Update the API base URL in `mobile/lib/main.dart` if needed:
+```dart
+baseUrl: 'http://localhost:8001',  // For emulator/simulator
+// or
+baseUrl: 'http://YOUR_IP:8001',    // For physical device
+```
+
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
+### Backend
+- **Framework:** Express.js with TypeScript
+- **Runtime:** Node.js 18+
+- **HTTP Client:** Native fetch API
 - **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+- **API:** OpenRouter for LLM access
+
+### Web Frontend
+- **Framework:** React 19 with Vite
+- **UI Components:** Radix UI primitives
+- **Styling:** Modern CSS with custom properties (light theme)
+- **Markdown:** react-markdown for rendering responses
+- **Design:** Clean white theme with black accents
+
+### Mobile App
+- **Framework:** Flutter 3.0+
+- **State Management:** Provider pattern
+- **UI:** Material Design 3 (dark theme)
+- **HTTP:** http package with SSE support
+- **API Integration:** RESTful endpoints with streaming

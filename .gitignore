@@ -19,3 +19,8 @@ data/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+
+# Server (Node.js/TypeScript)
+server/node_modules/
+server/dist/
+server/.env
