@@ -11,6 +11,16 @@ wheels/
 
 # Keys and secrets
 .env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+.secrets
+config.local.*
 
 # Data files
 data/
@@ -19,3 +29,8 @@ data/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
