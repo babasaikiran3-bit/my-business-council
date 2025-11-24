@@ -5,10 +5,21 @@ import { api } from './api';
 import './App.css';
 
 function App() {
+  const [theme, setTheme] = useState(() => {
+    const stored = typeof window !== 'undefined'
+      ? localStorage.getItem('theme')
+      : null;
+    return stored === 'dark' ? 'dark' : 'light';
+  });
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -181,8 +192,20 @@ function App() {
     }
   };
 
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
   return (
     <div className="app">
+      <button
+        className="theme-toggle"
+        type="button"
+        onClick={toggleTheme}
+        aria-label="Toggle theme"
+      >
+        {theme === 'light' ? 'Dark mode' : 'Light mode'}
+      </button>
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
