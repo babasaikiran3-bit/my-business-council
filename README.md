@@ -14,6 +14,26 @@ In a bit more detail, here is what happens when you submit a query:
 
 This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
 
+## LLM Council Community & Memecoin
+
+An unexpected and fun outcome of the LLM Council project has been the emergence of a broader community forming around its creation and experimentation. This community has extended into the crypto space with the launch of an associated memecoin on Pump.fun, acting as both a cultural artifact and a point of coordination for enthusiasts exploring LLM collectives, vibe coding, and decentralized experimentation.
+
+🪙 **Community Memecoin**
+
+**Name:** LLM Council
+
+**Chain:** Solana 
+
+**Contract Address (CA):** CgjoU3qpmXEhxzUuFjudp6ptGGbFtsHjbUBgQEFY26o1
+
+🐦 Community Hub
+
+Join the conversation, share experiments, and follow ongoing developments here:
+
+X (Twitter) Community Link: [llm-council](https://x.com/i/communities/1980727110982648115)
+
+This initiative is purely community-driven and exists as a lighthearted extension of the project’s ethos — experimental, open, and playful. Participation is optional and for fun.
+
 ## Setup
 
 ### 1. Install Dependencies
