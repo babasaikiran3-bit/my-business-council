@@ -64,6 +64,8 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ./start.sh
 ```
 
+(or `make dev` if you prefer Make)
+
 **Option 2: Run manually**
 
 Terminal 1 (Backend):
@@ -78,6 +80,14 @@ npm run dev
 ```
 
 Then open http://localhost:5173 in your browser.
+
+**Option 3: GitHub Codespaces**
+
+You can also just run the app in a Github codespace:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/karpathy/llm-council)
+
+Edit `.env` with your [OpenRouter API key](https://openrouter.ai/), then run `make dev`.
 
 ## Tech Stack
 
