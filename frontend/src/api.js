@@ -112,4 +112,28 @@ export const api = {
       }
     }
   },
+
+  /**
+   * Run the council election.
+   */
+  async runElection() {
+    const response = await fetch(`${API_BASE}/api/election`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to run election');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get the current election status.
+   */
+  async getElectionStatus() {
+    const response = await fetch(`${API_BASE}/api/election`);
+    if (!response.ok) {
+      throw new Error('Failed to get election status');
+    }
+    return response.json();
+  },
 };

@@ -11,8 +11,17 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .election import run_election
+from .config import CHAIRMAN_MODEL as DEFAULT_CHAIRMAN_MODEL
 
 app = FastAPI(title="LLM Council API")
+
+# Global election state (in-memory)
+ELECTION_STATE = {
+    "status": "pending", # pending, running, completed
+    "winner": None,
+    "results": None
+}
 
 # Enable CORS for local development
 app.add_middleware(
@@ -101,9 +110,13 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
+    # Determine chairman (use elected one or default)
+    chairman = ELECTION_STATE["winner"] if ELECTION_STATE["winner"] else DEFAULT_CHAIRMAN_MODEL
+
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content,
+        chairman
     )
 
     # Add assistant message with all stages
@@ -158,9 +171,12 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
+            # Determine chairman (use elected one or default)
+            chairman = ELECTION_STATE["winner"] if ELECTION_STATE["winner"] else DEFAULT_CHAIRMAN_MODEL
+
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, chairman)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
@@ -193,7 +209,34 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
         }
     )
 
+@app.get("/api/election")
+async def get_election_status():
+    """Get the current election status."""
+    return ELECTION_STATE
 
+
+@app.post("/api/election")
+async def start_election():
+    """Run the council election."""
+    global ELECTION_STATE
+    
+    if ELECTION_STATE["status"] == "running":
+        raise HTTPException(status_code=400, detail="Election already running")
+        
+    ELECTION_STATE["status"] = "running"
+    
+    try:
+        results = await run_election()
+        
+        ELECTION_STATE["status"] = "completed"
+        ELECTION_STATE["results"] = results
+        ELECTION_STATE["winner"] = results["winner"]
+        
+        return ELECTION_STATE
+        
+    except Exception as e:
+        ELECTION_STATE["status"] = "error"
+        raise HTTPException(status_code=500, detail=str(e))
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)

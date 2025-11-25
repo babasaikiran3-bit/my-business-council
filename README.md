@@ -4,11 +4,24 @@
 
 The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
 
-In a bit more detail, here is what happens when you submit a query:
+## How It Works
+
+### Initial Setup: Council Election
+
+Before using the council, the models participate in a democratic election to select a Chairman:
+1. **Manifestos**: Each council member submits a brief manifesto explaining why they should be Chairman, focusing on their ability to synthesize information fairly.
+2. **Voting**: Each model votes for the candidate they believe is best suited to synthesize the council's diverse perspectives.
+3. **Winner**: The candidate with the most votes becomes the Chairman (ties are broken randomly).
+
+The elected Chairman persists across all conversations in your session.
+
+### Query Processing: Three Stages
+
+When you submit a query to the council:
 
 1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
 2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+3. **Stage 3: Final response**. The elected Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
 
 ## Vibe Code Alert
 
@@ -16,16 +29,22 @@ This project was 99% vibe coded as a fun Saturday hack because I wanted to explo
 
 ## Setup
 
+### Prerequisites
+
+- **[uv](https://docs.astral.sh/uv/)**: Python package manager.
+- **Node.js & npm**: For the frontend.
+- **OpenRouter API Key**: Required to access the LLMs.
+
 ### 1. Install Dependencies
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
-
 **Backend:**
+Run this in the project root directory:
 ```bash
 uv sync
 ```
 
 **Frontend:**
+Navigate to the frontend directory:
 ```bash
 cd frontend
 npm install
@@ -42,9 +61,9 @@ OPENROUTER_API_KEY=sk-or-v1-...
 
 Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
 
-### 3. Configure Models (Optional)
+### 3. Configure Council Members (Optional)
 
-Edit `backend/config.py` to customize the council:
+Edit `backend/config.py` to customize which models are in the council:
 
 ```python
 COUNCIL_MODELS = [
@@ -53,9 +72,9 @@ COUNCIL_MODELS = [
     "anthropic/claude-sonnet-4.5",
     "x-ai/grok-4",
 ]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
+
+The Chairman is elected dynamically through a voting process among the council members, not pre-configured. If no election has been run yet, there's a fallback default in the config, but this is only used if the election fails to complete.
 
 ## Running the Application
 

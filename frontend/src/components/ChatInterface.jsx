@@ -9,6 +9,7 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  chairman,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -50,6 +51,11 @@ export default function ChatInterface({
 
   return (
     <div className="chat-interface">
+      {chairman && (
+        <div className="chairman-badge">
+          <span className="chairman-name">Elected Chairman: {chairman}</span>
+        </div>
+      )}
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">

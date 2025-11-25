@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import Election from './components/Election';
 import { api } from './api';
 import './App.css';
 
@@ -9,10 +10,13 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [electionState, setElectionState] = useState({ status: 'loading', results: null });
+  const [showChat, setShowChat] = useState(false);
 
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
+    checkElectionStatus();
   }, []);
 
   // Load conversation details when selected
@@ -38,6 +42,30 @@ function App() {
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
+  };
+
+  const checkElectionStatus = async () => {
+    try {
+      const status = await api.getElectionStatus();
+      setElectionState(status);
+    } catch (error) {
+      console.error('Failed to get election status:', error);
+    }
+  };
+
+  const handleStartElection = async () => {
+    setElectionState(prev => ({ ...prev, status: 'running' }));
+    try {
+      const results = await api.runElection();
+      setElectionState(results);
+    } catch (error) {
+      console.error('Failed to run election:', error);
+      setElectionState(prev => ({ ...prev, status: 'error' }));
+    }
+  };
+
+  const handleProceed = () => {
+    setShowChat(true);
   };
 
   const handleNewConversation = async () => {
@@ -189,11 +217,22 @@ function App() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
       />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-      />
+
+      {electionState.status !== 'completed' || !showChat ? (
+        <Election
+          status={electionState.status}
+          results={electionState.results}
+          onStartElection={handleStartElection}
+          onProceed={handleProceed}
+        />
+      ) : (
+        <ChatInterface
+          conversation={currentConversation}
+          onSendMessage={handleSendMessage}
+          isLoading={isLoading}
+          chairman={electionState.results?.winner}
+        />
+      )}
     </div>
   );
 }
