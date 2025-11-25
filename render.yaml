@@ -1,0 +1,22 @@
+services:
+  # Backend API
+  - type: web
+    name: llm-council-api
+    runtime: python
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run python -m backend.main
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false  # Set in Render dashboard
+      - key: CORS_ORIGINS
+        value: https://llm-council.onrender.com  # <-- Update to your frontend URL
+
+  # Frontend static site
+  - type: web
+    name: llm-council
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://llm-council-api.onrender.com  # <-- Update to your backend URL
