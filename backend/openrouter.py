@@ -2,13 +2,13 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL, DEFAULT_TIMEOUT
 
 
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
-    timeout: float = 120.0
+    timeout: float = None
 ) -> Optional[Dict[str, Any]]:
     """
     Query a single model via OpenRouter API.
@@ -16,11 +16,14 @@ async def query_model(
     Args:
         model: OpenRouter model identifier (e.g., "openai/gpt-4o")
         messages: List of message dicts with 'role' and 'content'
-        timeout: Request timeout in seconds
+        timeout: Request timeout in seconds (defaults to DEFAULT_TIMEOUT from config)
 
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT
+    
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -48,8 +51,21 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.ConnectError as e:
+        print(f"Connection error querying model {model}: Cannot connect to OpenRouter API. Check your internet connection. Error: {e}")
+        return None
+    except httpx.HTTPStatusError as e:
+        print(f"HTTP error querying model {model}: Status {e.response.status_code}. Response: {e.response.text}")
+        if e.response.status_code == 401:
+            print("  Hint: Check if OPENROUTER_API_KEY is valid")
+        elif e.response.status_code == 404:
+            print(f"  Hint: Model '{model}' may not exist or may not be available")
+        return None
+    except httpx.TimeoutException as e:
+        print(f"Timeout error querying model {model}: Request took longer than {timeout}s. Error: {e}")
+        return None
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
+        print(f"Unexpected error querying model {model}: {type(e).__name__}: {e}")
         return None
 
 

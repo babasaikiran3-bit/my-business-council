@@ -57,6 +57,34 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleDeleteConversation = async (id, e) => {
+    try {
+      await api.deleteConversation(id);
+      // If deleted conversation was current, clear it
+      if (id === currentConversationId) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      }
+      // Reload conversations list
+      loadConversations();
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      alert('Failed to delete conversation');
+    }
+  };
+
+  const handleDeleteAllConversations = async () => {
+    try {
+      await api.deleteAllConversations();
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+      loadConversations();
+    } catch (error) {
+      console.error('Failed to delete all conversations:', error);
+      alert('Failed to delete all conversations');
+    }
+  };
+
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 
@@ -76,6 +104,11 @@ function App() {
         stage2: null,
         stage3: null,
         metadata: null,
+        timings: {
+          stage1: { start: null, end: null, duration: null },
+          stage2: { start: null, end: null, duration: null },
+          stage3: { start: null, end: null, duration: null },
+        },
         loading: {
           stage1: false,
           stage2: false,
@@ -97,6 +130,8 @@ function App() {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
               lastMsg.loading.stage1 = true;
+              // 서버 타임스탬프가 있으면 사용, 없으면 현재 시간 사용
+              lastMsg.timings.stage1.start = event.timestamp || Date.now() / 1000;
               return { ...prev, messages };
             });
             break;
@@ -107,6 +142,12 @@ function App() {
               const lastMsg = messages[messages.length - 1];
               lastMsg.stage1 = event.data;
               lastMsg.loading.stage1 = false;
+              if (event.timestamp) {
+                lastMsg.timings.stage1.end = event.timestamp;
+              }
+              if (event.duration !== undefined) {
+                lastMsg.timings.stage1.duration = event.duration;
+              }
               return { ...prev, messages };
             });
             break;
@@ -116,6 +157,8 @@ function App() {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
               lastMsg.loading.stage2 = true;
+              // 서버 타임스탬프가 있으면 사용, 없으면 현재 시간 사용
+              lastMsg.timings.stage2.start = event.timestamp || Date.now() / 1000;
               return { ...prev, messages };
             });
             break;
@@ -127,6 +170,12 @@ function App() {
               lastMsg.stage2 = event.data;
               lastMsg.metadata = event.metadata;
               lastMsg.loading.stage2 = false;
+              if (event.timestamp) {
+                lastMsg.timings.stage2.end = event.timestamp;
+              }
+              if (event.duration !== undefined) {
+                lastMsg.timings.stage2.duration = event.duration;
+              }
               return { ...prev, messages };
             });
             break;
@@ -136,6 +185,8 @@ function App() {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
               lastMsg.loading.stage3 = true;
+              // 서버 타임스탬프가 있으면 사용, 없으면 현재 시간 사용
+              lastMsg.timings.stage3.start = event.timestamp || Date.now() / 1000;
               return { ...prev, messages };
             });
             break;
@@ -146,6 +197,12 @@ function App() {
               const lastMsg = messages[messages.length - 1];
               lastMsg.stage3 = event.data;
               lastMsg.loading.stage3 = false;
+              if (event.timestamp) {
+                lastMsg.timings.stage3.end = event.timestamp;
+              }
+              if (event.duration !== undefined) {
+                lastMsg.timings.stage3.duration = event.duration;
+              }
               return { ...prev, messages };
             });
             break;
@@ -188,6 +245,8 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
+        onDeleteAllConversations={handleDeleteAllConversations}
       />
       <ChatInterface
         conversation={currentConversation}

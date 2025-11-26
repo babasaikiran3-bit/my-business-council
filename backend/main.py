@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import time
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
@@ -79,6 +80,23 @@ async def get_conversation(conversation_id: str):
     return conversation
 
 
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a specific conversation."""
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    storage.delete_conversation(conversation_id)
+    return {"status": "deleted", "id": conversation_id}
+
+
+@app.delete("/api/conversations")
+async def delete_all_conversations():
+    """Delete all conversations."""
+    storage.delete_all_conversations()
+    return {"status": "deleted", "count": "all"}
+
+
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
@@ -148,20 +166,29 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+            stage1_start_time = time.time()
+            yield f"data: {json.dumps({'type': 'stage1_start', 'timestamp': stage1_start_time})}\n\n"
             stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            stage1_end_time = time.time()
+            stage1_duration = stage1_end_time - stage1_start_time
+            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'timestamp': stage1_end_time, 'duration': stage1_duration})}\n\n"
 
             # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+            stage2_start_time = time.time()
+            yield f"data: {json.dumps({'type': 'stage2_start', 'timestamp': stage2_start_time})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            stage2_end_time = time.time()
+            stage2_duration = stage2_end_time - stage2_start_time
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}, 'timestamp': stage2_end_time, 'duration': stage2_duration})}\n\n"
 
             # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+            stage3_start_time = time.time()
+            yield f"data: {json.dumps({'type': 'stage3_start', 'timestamp': stage3_start_time})}\n\n"
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+            stage3_end_time = time.time()
+            stage3_duration = stage3_end_time - stage3_start_time
+            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'timestamp': stage3_end_time, 'duration': stage3_duration})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:

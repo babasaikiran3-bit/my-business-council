@@ -1,8 +1,15 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, ROUTER_TYPE, TITLE_GENERATION_TIMEOUT
+
+# Import router module based on configuration
+if ROUTER_TYPE == "ollama":
+    from .ollama import query_models_parallel, query_model
+elif ROUTER_TYPE == "openrouter":
+    from .openrouter import query_models_parallel, query_model
+else:
+    raise ValueError(f"Invalid ROUTER_TYPE: {ROUTER_TYPE}")
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -162,10 +169,37 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     response = await query_model(CHAIRMAN_MODEL, messages)
 
     if response is None:
-        # Fallback if chairman fails
+        # Try fallback: use the best-ranked model from Stage 1 as chairman
+        print(f"Warning: Chairman model {CHAIRMAN_MODEL} failed. Attempting fallback...")
+        
+        # If we have stage1 results, try using the first one as fallback
+        if stage1_results:
+            fallback_model = stage1_results[0]['model']
+            print(f"Attempting to use {fallback_model} as fallback chairman...")
+            fallback_response = await query_model(fallback_model, messages)
+            
+            if fallback_response is not None:
+                return {
+                    "model": fallback_model,
+                    "response": fallback_response.get('content', ''),
+                    "fallback_used": True,
+                    "original_chairman": CHAIRMAN_MODEL
+                }
+        
+        # If fallback also failed, return error with context
+        error_msg = (
+            f"Error: Unable to generate final synthesis. "
+            f"Chairman model '{CHAIRMAN_MODEL}' failed to respond. "
+            f"Please check: "
+            f"1) Is the model available? "
+            f"2) Is {ROUTER_TYPE} service running/accessible? "
+            f"3) Check server logs for detailed error messages."
+        )
+        print(error_msg)
         return {
             "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
+            "response": error_msg,
+            "error": True
         }
 
     return {
@@ -274,8 +308,9 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use the chairman model for title generation
+    # Increased timeout for Ollama models which may need time to load
+    response = await query_model(CHAIRMAN_MODEL, messages, timeout=TITLE_GENERATION_TIMEOUT)
 
     if response is None:
         # Fallback to a generic title

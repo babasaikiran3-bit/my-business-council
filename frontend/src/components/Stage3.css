@@ -1,6 +1,57 @@
 .stage3 {
   background: #f0fff0;
   border-color: #c8e6c8;
+  position: relative;
+}
+
+.stage3 .stage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.stage3 .stage-title {
+  margin: 0;
+  color: #333;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.stage3 .stage-timing-top-right {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #666;
+  z-index: 10;
+}
+
+.stage3 .stage-timing-top-right span {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 4px;
+  font-family: monospace;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #c8e6c8;
+}
+
+.stage3 .timing-start {
+  color: #4a90e2;
+}
+
+.stage3 .timing-end {
+  color: #2d8a2d;
+}
+
+.stage3 .timing-duration {
+  color: #e67e22;
+  font-weight: 600;
 }
 
 .final-response {

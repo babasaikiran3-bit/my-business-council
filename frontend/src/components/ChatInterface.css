@@ -73,8 +73,9 @@
 
 .stage-loading {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   padding: 16px;
   margin: 12px 0;
   background: #f9fafb;
@@ -82,7 +83,70 @@
   border: 1px solid #e0e0e0;
   color: #666;
   font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.loading-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   font-style: italic;
+}
+
+.realtime-timing {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-style: normal;
+  align-items: center;
+}
+
+.realtime-timing span {
+  padding: 6px 10px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.realtime-timing .timing-start {
+  color: #4a90e2;
+}
+
+.realtime-timing .timing-elapsed {
+  color: #e67e22;
+  font-weight: 700;
+  font-size: 13px;
+  background: #fff3e0;
+  border: 1px solid #ffb74d;
+  animation: countUp 0.1s ease-in-out;
+  min-width: 80px;
+  text-align: center;
+}
+
+.realtime-timing .timing-elapsed.pulse {
+  animation: pulse 0.1s ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+}
+
+@keyframes countUp {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .spinner {
