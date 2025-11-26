@@ -5,7 +5,11 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from .config import DATA_DIR
+
+try:
+    from .config import DATA_DIR
+except ImportError:
+    from config import DATA_DIR
 
 
 def ensure_data_dir():
@@ -105,6 +109,25 @@ def list_conversations() -> List[Dict[str, Any]]:
     conversations.sort(key=lambda x: x["created_at"], reverse=True)
 
     return conversations
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """
+    Delete a conversation.
+
+    Args:
+        conversation_id: Unique identifier for the conversation
+
+    Returns:
+        True if deleted, False if not found
+    """
+    path = get_conversation_path(conversation_id)
+    
+    if not os.path.exists(path):
+        return False
+    
+    os.remove(path)
+    return True
 
 
 def add_user_message(conversation_id: str, content: str):
