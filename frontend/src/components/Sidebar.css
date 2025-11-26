@@ -36,6 +36,12 @@
   border-color: #357abd;
 }
 
+.new-conversation-btn:disabled {
+  background: #a0c4e8;
+  border-color: #a0c4e8;
+  cursor: not-allowed;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
@@ -55,6 +61,9 @@
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .conversation-item:hover {
@@ -70,9 +79,47 @@
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.conversation-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-delete-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #999;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.conversation-delete-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #d9534f;
+}
+
+.conversation-item.active .conversation-delete-btn {
+  color: #4a4a4a;
+}
+
+.loading-conversations {
+  padding: 16px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  font-style: italic;
 }

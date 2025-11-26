@@ -4,16 +4,63 @@ import ChatInterface from './components/ChatInterface';
 import { api } from './api';
 import './App.css';
 
+const LAST_CONVERSATION_KEY = 'llm-council:last-conversation';
+
+const getStoredConversationId = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.localStorage.getItem(LAST_CONVERSATION_KEY);
+};
+
 function App() {
   const [conversations, setConversations] = useState([]);
-  const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [currentConversationId, setCurrentConversationId] = useState(
+    () => getStoredConversationId() || null
+  );
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
 
   // Load conversations on mount
   useEffect(() => {
-    loadConversations();
+    const init = async () => {
+      const success = await loadConversations();
+      if (success) {
+        setIsConnecting(false);
+        return;
+      }
+
+      // Retry if backend is not ready yet
+      const interval = setInterval(async () => {
+        const retrySuccess = await loadConversations();
+        if (retrySuccess) {
+          clearInterval(interval);
+          setIsConnecting(false);
+        }
+      }, 500);
+
+      // Stop retrying after 10 seconds
+      setTimeout(() => {
+        clearInterval(interval);
+        setIsConnecting(false);
+      }, 10000);
+    };
+    init();
   }, []);
+
+  // Persist the current conversation selection
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (currentConversationId) {
+      window.localStorage.setItem(LAST_CONVERSATION_KEY, currentConversationId);
+    } else {
+      window.localStorage.removeItem(LAST_CONVERSATION_KEY);
+    }
+  }, [currentConversationId]);
 
   // Load conversation details when selected
   useEffect(() => {
@@ -26,8 +73,29 @@ function App() {
     try {
       const convs = await api.listConversations();
       setConversations(convs);
+      if (convs.length === 0) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+        return true;
+      }
+
+      setCurrentConversationId((prevId) => {
+        if (prevId && convs.some((conv) => conv.id === prevId)) {
+          return prevId;
+        }
+
+        const storedId = getStoredConversationId();
+        if (storedId && convs.some((conv) => conv.id === storedId)) {
+          return storedId;
+        }
+
+        return convs[0].id;
+      });
+
+      return true;
     } catch (error) {
       console.error('Failed to load conversations:', error);
+      return false;
     }
   };
 
@@ -41,20 +109,60 @@ function App() {
   };
 
   const handleNewConversation = async () => {
+    if (isCreating) return;
+    setIsCreating(true);
     try {
       const newConv = await api.createConversation();
-      setConversations([
+      setConversations(prev => [
         { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
-        ...conversations,
+        ...prev,
       ]);
       setCurrentConversationId(newConv.id);
     } catch (error) {
       console.error('Failed to create conversation:', error);
+      alert('Failed to create conversation. Please check if the backend is running.');
+    } finally {
+      setIsCreating(false);
     }
   };
 
   const handleSelectConversation = (id) => {
-    setCurrentConversationId(id);
+    if (id !== currentConversationId) {
+      setCurrentConversation(null);
+      setCurrentConversationId(id);
+    }
+  };
+
+  const handleDeleteConversation = async (conversationId) => {
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm('Delete this conversation?');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      await api.deleteConversation(conversationId);
+      setConversations((prevConvs) => {
+        const updated = prevConvs.filter((conv) => conv.id !== conversationId);
+
+        setCurrentConversationId((prevId) => {
+          if (prevId === conversationId) {
+            return updated[0]?.id || null;
+          }
+          return prevId;
+        });
+
+        if (currentConversation?.id === conversationId) {
+          setCurrentConversation(null);
+        }
+
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      alert('Failed to delete conversation. Please try again.');
+    }
   };
 
   const handleSendMessage = async (content) => {
@@ -187,7 +295,10 @@ function App() {
         conversations={conversations}
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
+      onNewConversation={handleNewConversation}
+      onDeleteConversation={handleDeleteConversation}
+      isCreating={isCreating}
+      isConnecting={isConnecting}
       />
       <ChatInterface
         conversation={currentConversation}

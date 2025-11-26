@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -65,9 +65,13 @@ async def list_conversations():
 @app.post("/api/conversations", response_model=Conversation)
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
-    conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
-    return conversation
+    try:
+        conversation_id = str(uuid.uuid4())
+        conversation = storage.create_conversation(conversation_id)
+        return conversation
+    except Exception as e:
+        print(f"Error creating conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
@@ -77,6 +81,16 @@ async def get_conversation(conversation_id: str):
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(conversation_id: str):
+    """Delete a specific conversation."""
+    try:
+        storage.delete_conversation(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return Response(status_code=204)
 
 
 @app.post("/api/conversations/{conversation_id}/message")
