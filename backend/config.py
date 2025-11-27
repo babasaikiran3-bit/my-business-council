@@ -8,6 +8,13 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Validate API key at startup
+if not OPENROUTER_API_KEY:
+    raise ValueError(
+        "OPENROUTER_API_KEY is not set. "
+        "Please create a .env file with your API key: OPENROUTER_API_KEY=sk-or-v1-..."
+    )
+
 # Council members - list of OpenRouter model identifiers
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
