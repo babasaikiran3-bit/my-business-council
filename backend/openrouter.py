@@ -2,10 +2,47 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+import logging
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError)),
+    before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING),
+    reraise=True,
+)
+async def _query_model_with_retry(
+    model: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout: float
+) -> Dict[str, Any]:
+    """
+    Internal function that performs the actual API call with retry logic.
+
+    This is separated to allow tenacity to retry only network-related errors
+    while letting other errors (like HTTP 4xx) fail immediately.
+    """
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            OPENROUTER_API_URL,
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 async def query_model(
@@ -14,7 +51,16 @@ async def query_model(
     timeout: float = 120.0
 ) -> Optional[Dict[str, Any]]:
     """
-    Query a single model via OpenRouter API.
+    Query a single model via OpenRouter API with automatic retries.
+
+    Automatically retries on:
+    - Network errors (with exponential backoff: 2s, 4s, 8s)
+    - Timeout errors
+    - Connection errors
+
+    Does NOT retry on:
+    - HTTP 4xx errors (client errors - bad request, auth, etc.)
+    - HTTP 5xx errors (server errors - will fail fast)
 
     Args:
         model: OpenRouter model identifier (e.g., "openai/gpt-4o")
@@ -35,28 +81,20 @@ async def query_model(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                OPENROUTER_API_URL,
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
+        data = await _query_model_with_retry(model, headers, payload, timeout)
+        message = data['choices'][0]['message']
 
-            data = response.json()
-            message = data['choices'][0]['message']
+        logger.debug(
+            "model_query_success",
+            model=model,
+            prompt_length=len(messages[0].get('content', '')) if messages else 0,
+            response_length=len(message.get('content', ''))
+        )
 
-            logger.debug(
-                "model_query_success",
-                model=model,
-                prompt_length=len(messages[0].get('content', '')) if messages else 0,
-                response_length=len(message.get('content', ''))
-            )
-
-            return {
-                'content': message.get('content'),
-                'reasoning_details': message.get('reasoning_details')
-            }
+        return {
+            'content': message.get('content'),
+            'reasoning_details': message.get('reasoning_details')
+        }
 
     except httpx.TimeoutException as e:
         logger.warning(
