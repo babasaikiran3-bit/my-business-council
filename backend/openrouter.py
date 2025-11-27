@@ -28,12 +28,15 @@ async def _query_model_with_retry(
     headers: Dict[str, str],
     payload: Dict[str, Any],
     timeout: float
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], httpx.Headers]:
     """
     Internal function that performs the actual API call with retry logic.
 
     This is separated to allow tenacity to retry only network-related errors
     while letting other errors (like HTTP 4xx) fail immediately.
+
+    Returns:
+        Tuple of (response_data, response_headers) to capture cost info
     """
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
@@ -42,7 +45,7 @@ async def _query_model_with_retry(
             json=payload
         )
         response.raise_for_status()
-        return response.json()
+        return response.json(), response.headers
 
 
 async def query_model(
@@ -81,19 +84,34 @@ async def query_model(
     }
 
     try:
-        data = await _query_model_with_retry(model, headers, payload, timeout)
+        data, response_headers = await _query_model_with_retry(model, headers, payload, timeout)
         message = data['choices'][0]['message']
+
+        # Extract cost information from OpenRouter headers
+        # OpenRouter returns cost in USD as a string in the header
+        cost_usd = 0.0
+        if 'x-openrouter-cost' in response_headers:
+            try:
+                cost_usd = float(response_headers['x-openrouter-cost'])
+            except (ValueError, TypeError):
+                logger.warning(
+                    "failed_to_parse_cost",
+                    model=model,
+                    cost_header=response_headers.get('x-openrouter-cost')
+                )
 
         logger.debug(
             "model_query_success",
             model=model,
             prompt_length=len(messages[0].get('content', '')) if messages else 0,
-            response_length=len(message.get('content', ''))
+            response_length=len(message.get('content', '')),
+            cost_usd=cost_usd
         )
 
         return {
             'content': message.get('content'),
-            'reasoning_details': message.get('reasoning_details')
+            'reasoning_details': message.get('reasoning_details'),
+            'cost_usd': cost_usd
         }
 
     except httpx.TimeoutException as e:
