@@ -3,11 +3,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import re
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
@@ -31,7 +32,33 @@ class CreateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
-    content: str
+    content: str = Field(
+        min_length=1,
+        max_length=10000,
+        description="The message content"
+    )
+
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        """Validate and sanitize message content."""
+        # Strip whitespace
+        v = v.strip()
+
+        # Check if empty after stripping
+        if not v:
+            raise ValueError('Message cannot be empty or contain only whitespace')
+
+        # Check for excessively long lines (potential abuse)
+        lines = v.split('\n')
+        if any(len(line) > 5000 for line in lines):
+            raise ValueError('Individual lines cannot exceed 5000 characters')
+
+        # Limit number of newlines (prevent abuse)
+        if v.count('\n') > 500:
+            raise ValueError('Message cannot exceed 500 lines')
+
+        return v
 
 
 class ConversationMetadata(BaseModel):
@@ -70,9 +97,47 @@ async def create_conversation(request: CreateConversationRequest):
     return conversation
 
 
+def validate_conversation_id(conversation_id: str) -> str:
+    """
+    Validate conversation ID to prevent path traversal and injection attacks.
+
+    Args:
+        conversation_id: The conversation ID to validate
+
+    Returns:
+        The validated conversation ID
+
+    Raises:
+        HTTPException: If the conversation ID is invalid
+    """
+    # Allow only UUID-like strings (alphanumeric and hyphens)
+    if not re.match(r'^[a-zA-Z0-9\-]+$', conversation_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID format"
+        )
+
+    # Prevent path traversal attempts
+    if '..' in conversation_id or '/' in conversation_id or '\\' in conversation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID format"
+        )
+
+    # Limit length to reasonable UUID size
+    if len(conversation_id) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Conversation ID too long"
+        )
+
+    return conversation_id
+
+
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
 async def get_conversation(conversation_id: str):
     """Get a specific conversation with all its messages."""
+    conversation_id = validate_conversation_id(conversation_id)
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -85,6 +150,15 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
+    logger.info(
+        "message_received",
+        conversation_id=conversation_id,
+        message_length=len(request.content)
+    )
+
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
@@ -102,8 +176,15 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         storage.update_conversation_title(conversation_id, title)
 
     # Run the 3-stage council process
+    logger.info("council_process_starting", conversation_id=conversation_id)
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
         request.content
+    )
+    logger.info(
+        "council_process_complete",
+        conversation_id=conversation_id,
+        stage1_responses=len(stage1_results),
+        stage2_rankings=len(stage2_results)
     )
 
     # Add assistant message with all stages
@@ -129,6 +210,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:

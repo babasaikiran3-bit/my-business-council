@@ -3,6 +3,9 @@
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -15,6 +18,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     Returns:
         List of dicts with 'model' and 'response' keys
     """
+    logger.info("stage1_starting", models_count=len(COUNCIL_MODELS))
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
@@ -28,6 +32,14 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
                 "model": model,
                 "response": response.get('content', '')
             })
+
+    successful = len(stage1_results)
+    failed = len(COUNCIL_MODELS) - successful
+    logger.info(
+        "stage1_complete",
+        successful_responses=successful,
+        failed_responses=failed
+    )
 
     return stage1_results
 
@@ -94,6 +106,8 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
+    logger.info("stage2_starting", responses_to_rank=len(stage1_results))
+
     # Get rankings from all council models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
@@ -108,6 +122,11 @@ Now provide your evaluation and ranking:"""
                 "ranking": full_text,
                 "parsed_ranking": parsed
             })
+
+    logger.info(
+        "stage2_complete",
+        rankings_received=len(stage2_results)
+    )
 
     return stage2_results, label_to_model
 
@@ -158,15 +177,20 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
+    logger.info("stage3_starting", chairman_model=CHAIRMAN_MODEL)
+
     # Query the chairman model
     response = await query_model(CHAIRMAN_MODEL, messages)
 
     if response is None:
+        logger.error("stage3_failed", chairman_model=CHAIRMAN_MODEL)
         # Fallback if chairman fails
         return {
             "model": CHAIRMAN_MODEL,
             "response": "Error: Unable to generate final synthesis."
         }
+
+    logger.info("stage3_complete", chairman_model=CHAIRMAN_MODEL)
 
     return {
         "model": CHAIRMAN_MODEL,
