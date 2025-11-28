@@ -176,6 +176,30 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Fetch attached repositories and build context
+    repo_context = None
+    backend = storage.get_storage_backend()
+    if isinstance(backend, SQLiteStorageBackend):
+        session = backend.SessionLocal()
+        try:
+            conv_repos = session.query(ConversationRepository).filter_by(
+                conversation_id=conversation_id
+            ).all()
+
+            if conv_repos:
+                repo_summaries = []
+                for conv_repo in conv_repos:
+                    repo = session.query(Repository).filter_by(id=conv_repo.repository_id).first()
+                    if repo and repo.summary:
+                        repo_summaries.append(repo.summary)
+
+                if repo_summaries:
+                    repo_context = "# Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries)
+                    logger.info("repo_context_loaded", conversation_id=conversation_id, repos_count=len(repo_summaries))
+
+        finally:
+            session.close()
+
     # Add user message
     storage.add_user_message(conversation_id, request.content)
 
@@ -184,10 +208,11 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
+    # Run the 3-stage council process (with optional repo context)
     logger.info("council_process_starting", conversation_id=conversation_id)
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content,
+        repo_context
     )
     logger.info(
         "council_process_complete",
@@ -230,6 +255,30 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Fetch attached repositories and build context
+    repo_context = None
+    backend = storage.get_storage_backend()
+    if isinstance(backend, SQLiteStorageBackend):
+        session = backend.SessionLocal()
+        try:
+            conv_repos = session.query(ConversationRepository).filter_by(
+                conversation_id=conversation_id
+            ).all()
+
+            if conv_repos:
+                repo_summaries = []
+                for conv_repo in conv_repos:
+                    repo = session.query(Repository).filter_by(id=conv_repo.repository_id).first()
+                    if repo and repo.summary:
+                        repo_summaries.append(repo.summary)
+
+                if repo_summaries:
+                    repo_context = "# Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries)
+                    logger.info("repo_context_loaded", conversation_id=conversation_id, repos_count=len(repo_summaries))
+
+        finally:
+            session.close()
+
     async def event_generator():
         try:
             # Add user message
@@ -240,9 +289,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
+            # Stage 1: Collect responses (with optional repo context)
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(request.content, repo_context)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings

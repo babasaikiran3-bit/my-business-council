@@ -8,18 +8,31 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(user_query: str, repo_context: str = None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        repo_context: Optional repository context summaries
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    logger.info("stage1_starting", models_count=len(COUNCIL_MODELS))
-    messages = [{"role": "user", "content": user_query}]
+    logger.info("stage1_starting", models_count=len(COUNCIL_MODELS), has_repo_context=bool(repo_context))
+
+    # Build the user message with optional repo context
+    if repo_context:
+        full_query = f"""{repo_context}
+
+---
+
+User Question:
+{user_query}"""
+    else:
+        full_query = user_query
+
+    messages = [{"role": "user", "content": full_query}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
@@ -330,18 +343,19 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, repo_context: str = None) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        repo_context: Optional repository context summaries
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, repo_context)
 
     # If no models responded successfully, return error
     if not stage1_results:
