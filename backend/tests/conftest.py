@@ -15,8 +15,20 @@ os.environ.setdefault("LOG_LEVEL", "DEBUG")
 def temp_data_dir():
     """Create a temporary data directory for testing."""
     temp_dir = tempfile.mkdtemp()
+
+    # Set up isolated storage backend for this test
+    from backend.storage import set_storage_backend
+    from backend.storage.json_storage import JSONStorageBackend
+
+    backend = JSONStorageBackend(temp_dir)
+    set_storage_backend(backend)
+
     yield temp_dir
+
+    # Clean up
     shutil.rmtree(temp_dir)
+    # Reset storage backend to None
+    set_storage_backend(None)
 
 
 @pytest.fixture
