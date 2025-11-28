@@ -12,6 +12,12 @@ import re
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .logging_config import configure_logging, get_logger
+from .config import LOG_LEVEL
+
+# Configure logging
+configure_logging(log_level=LOG_LEVEL)
+logger = get_logger(__name__)
 
 app = FastAPI(title="LLM Council API")
 

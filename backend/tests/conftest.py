@@ -6,6 +6,10 @@ import tempfile
 import shutil
 from pathlib import Path
 
+# Set required environment variables before importing backend modules
+os.environ.setdefault("OPENROUTER_API_KEY", "test-api-key-for-testing")
+os.environ.setdefault("LOG_LEVEL", "DEBUG")
+
 
 @pytest.fixture
 def temp_data_dir():
