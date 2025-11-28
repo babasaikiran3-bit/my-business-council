@@ -10,10 +10,21 @@ from tenacity import (
     before_sleep_log,
 )
 import logging
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL, validate_config
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Validate config once when actually making API calls
+_config_validated = False
+
+
+def _ensure_config_validated():
+    """Validate config once before making API calls."""
+    global _config_validated
+    if not _config_validated:
+        validate_config()
+        _config_validated = True
 
 
 @retry(
@@ -73,6 +84,9 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
+    # Validate config before making API calls
+    _ensure_config_validated()
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",

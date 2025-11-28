@@ -16,7 +16,23 @@ dependencies = [
     "alembic>=1.13.0",
     "slowapi>=0.1.9",
     "pygithub>=2.1.1",
+    "click>=8.1.0",
+    "rich>=13.7.0",
 ]
+
+[project.scripts]
+llm-council = "backend.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["frontend*", "scripts*", "data*"]
+
+[tool.uv]
+package = true
 
 [project.optional-dependencies]
 dev = [

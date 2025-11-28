@@ -59,21 +59,28 @@ COUNCIL_MODELS = (
 # Can be overridden via environment variable: CHAIRMAN_MODEL="model-name"
 CHAIRMAN_MODEL = os.getenv("CHAIRMAN_MODEL", _DEFAULT_CHAIRMAN_MODEL)
 
-# Validate configuration
-if not OPENROUTER_API_KEY:
-    raise ValueError(
-        "OPENROUTER_API_KEY environment variable is required. "
-        "Please set it in your .env file or environment."
-    )
 
-if not COUNCIL_MODELS:
-    raise ValueError(
-        "COUNCIL_MODELS must contain at least one model. "
-        "Check your configuration or COUNCIL_MODELS environment variable."
-    )
+def validate_config():
+    """
+    Validate configuration.
 
-if not CHAIRMAN_MODEL:
-    raise ValueError(
-        "CHAIRMAN_MODEL is required. "
-        "Check your configuration or CHAIRMAN_MODEL environment variable."
-    )
+    This is called when actually using the council, not at import time.
+    This allows CLI --help and other commands to work without API key.
+    """
+    if not OPENROUTER_API_KEY:
+        raise ValueError(
+            "OPENROUTER_API_KEY environment variable is required. "
+            "Please set it in your .env file or environment."
+        )
+
+    if not COUNCIL_MODELS:
+        raise ValueError(
+            "COUNCIL_MODELS must contain at least one model. "
+            "Check your configuration or COUNCIL_MODELS environment variable."
+        )
+
+    if not CHAIRMAN_MODEL:
+        raise ValueError(
+            "CHAIRMAN_MODEL is required. "
+            "Check your configuration or CHAIRMAN_MODEL environment variable."
+        )
