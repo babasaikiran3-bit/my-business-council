@@ -1,0 +1,34 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: .docker/backend.Dockerfile
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    networks:
+      - llm-council-network
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./config.py:/app/config.py
+
+  frontend:
+    build:
+      context: .
+      dockerfile: .docker/frontend.Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:8001
+    networks:
+      - llm-council-network
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+networks:
+  llm-council-network:
+    driver: bridge
+
