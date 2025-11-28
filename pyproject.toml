@@ -10,4 +10,35 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "pydantic>=2.9.0",
+    "tenacity>=8.2.0",
+    "structlog>=24.1.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "slowapi>=0.1.9",
+    "pygithub>=2.1.1",
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.scripts]
+llm-council = "backend.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["frontend*", "scripts*", "data*"]
+
+[tool.uv]
+package = true
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
 ]

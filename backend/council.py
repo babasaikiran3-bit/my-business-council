@@ -3,31 +3,61 @@
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(user_query: str, repo_context: str = None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        repo_context: Optional repository context summaries
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    logger.info("stage1_starting", models_count=len(COUNCIL_MODELS), has_repo_context=bool(repo_context))
+
+    # Build the user message with optional repo context
+    if repo_context:
+        full_query = f"""{repo_context}
+
+---
+
+User Question:
+{user_query}"""
+    else:
+        full_query = user_query
+
+    messages = [{"role": "user", "content": full_query}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
-    # Format results
+    # Format results and track costs
     stage1_results = []
+    total_cost = 0.0
     for model, response in responses.items():
         if response is not None:  # Only include successful responses
+            cost = response.get('cost_usd', 0.0)
+            total_cost += cost
             stage1_results.append({
                 "model": model,
-                "response": response.get('content', '')
+                "response": response.get('content', ''),
+                "cost_usd": cost
             })
+
+    successful = len(stage1_results)
+    failed = len(COUNCIL_MODELS) - successful
+    logger.info(
+        "stage1_complete",
+        successful_responses=successful,
+        failed_responses=failed,
+        total_cost_usd=total_cost
+    )
 
     return stage1_results
 
@@ -94,20 +124,32 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
+    logger.info("stage2_starting", responses_to_rank=len(stage1_results))
+
     # Get rankings from all council models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
-    # Format results
+    # Format results and track costs
     stage2_results = []
+    total_cost = 0.0
     for model, response in responses.items():
         if response is not None:
             full_text = response.get('content', '')
+            cost = response.get('cost_usd', 0.0)
+            total_cost += cost
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
                 "model": model,
                 "ranking": full_text,
-                "parsed_ranking": parsed
+                "parsed_ranking": parsed,
+                "cost_usd": cost
             })
+
+    logger.info(
+        "stage2_complete",
+        rankings_received=len(stage2_results),
+        total_cost_usd=total_cost
+    )
 
     return stage2_results, label_to_model
 
@@ -158,19 +200,27 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
+    logger.info("stage3_starting", chairman_model=CHAIRMAN_MODEL)
+
     # Query the chairman model
     response = await query_model(CHAIRMAN_MODEL, messages)
 
     if response is None:
+        logger.error("stage3_failed", chairman_model=CHAIRMAN_MODEL)
         # Fallback if chairman fails
         return {
             "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
+            "response": "Error: Unable to generate final synthesis.",
+            "cost_usd": 0.0
         }
+
+    cost = response.get('cost_usd', 0.0)
+    logger.info("stage3_complete", chairman_model=CHAIRMAN_MODEL, cost_usd=cost)
 
     return {
         "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "response": response.get('content', ''),
+        "cost_usd": cost
     }
 
 
@@ -293,18 +343,19 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, repo_context: str = None) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        repo_context: Optional repository context summaries
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, repo_context)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -326,10 +377,22 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         stage2_results
     )
 
+    # Calculate total costs
+    stage1_cost = sum(r.get('cost_usd', 0.0) for r in stage1_results)
+    stage2_cost = sum(r.get('cost_usd', 0.0) for r in stage2_results)
+    stage3_cost = stage3_result.get('cost_usd', 0.0)
+    total_cost = stage1_cost + stage2_cost + stage3_cost
+
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "costs": {
+            "stage1_usd": round(stage1_cost, 6),
+            "stage2_usd": round(stage2_cost, 6),
+            "stage3_usd": round(stage3_cost, 6),
+            "total_usd": round(total_cost, 6)
+        }
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

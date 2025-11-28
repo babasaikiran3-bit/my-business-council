@@ -2,7 +2,61 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+import logging
+from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL, validate_config
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Validate config once when actually making API calls
+_config_validated = False
+
+
+def _ensure_config_validated():
+    """Validate config once before making API calls."""
+    global _config_validated
+    if not _config_validated:
+        validate_config()
+        _config_validated = True
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError)),
+    before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING),
+    reraise=True,
+)
+async def _query_model_with_retry(
+    model: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout: float
+) -> tuple[Dict[str, Any], httpx.Headers]:
+    """
+    Internal function that performs the actual API call with retry logic.
+
+    This is separated to allow tenacity to retry only network-related errors
+    while letting other errors (like HTTP 4xx) fail immediately.
+
+    Returns:
+        Tuple of (response_data, response_headers) to capture cost info
+    """
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            OPENROUTER_API_URL,
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json(), response.headers
 
 
 async def query_model(
@@ -11,7 +65,16 @@ async def query_model(
     timeout: float = 120.0
 ) -> Optional[Dict[str, Any]]:
     """
-    Query a single model via OpenRouter API.
+    Query a single model via OpenRouter API with automatic retries.
+
+    Automatically retries on:
+    - Network errors (with exponential backoff: 2s, 4s, 8s)
+    - Timeout errors
+    - Connection errors
+
+    Does NOT retry on:
+    - HTTP 4xx errors (client errors - bad request, auth, etc.)
+    - HTTP 5xx errors (server errors - will fail fast)
 
     Args:
         model: OpenRouter model identifier (e.g., "openai/gpt-4o")
@@ -21,6 +84,9 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
+    # Validate config before making API calls
+    _ensure_config_validated()
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -32,24 +98,62 @@ async def query_model(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                OPENROUTER_API_URL,
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
+        data, response_headers = await _query_model_with_retry(model, headers, payload, timeout)
+        message = data['choices'][0]['message']
 
-            data = response.json()
-            message = data['choices'][0]['message']
+        # Extract cost information from OpenRouter headers
+        # OpenRouter returns cost in USD as a string in the header
+        cost_usd = 0.0
+        if 'x-openrouter-cost' in response_headers:
+            try:
+                cost_usd = float(response_headers['x-openrouter-cost'])
+            except (ValueError, TypeError):
+                logger.warning(
+                    "failed_to_parse_cost",
+                    model=model,
+                    cost_header=response_headers.get('x-openrouter-cost')
+                )
 
-            return {
-                'content': message.get('content'),
-                'reasoning_details': message.get('reasoning_details')
-            }
+        logger.debug(
+            "model_query_success",
+            model=model,
+            prompt_length=len(messages[0].get('content', '')) if messages else 0,
+            response_length=len(message.get('content', '')),
+            cost_usd=cost_usd
+        )
 
+        return {
+            'content': message.get('content'),
+            'reasoning_details': message.get('reasoning_details'),
+            'cost_usd': cost_usd
+        }
+
+    except httpx.TimeoutException as e:
+        logger.warning(
+            "model_query_timeout",
+            model=model,
+            timeout=timeout,
+            error=str(e)
+        )
+        return None
+    except httpx.HTTPStatusError as e:
+        status_code = None
+        if hasattr(e, 'response') and e.response is not None:
+            status_code = e.response.status_code
+        logger.error(
+            "model_query_http_error",
+            model=model,
+            status_code=status_code,
+            error=str(e)
+        )
+        return None
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
+        logger.error(
+            "model_query_failed",
+            model=model,
+            error_type=type(e).__name__,
+            error=str(e)
+        )
         return None
 
 
