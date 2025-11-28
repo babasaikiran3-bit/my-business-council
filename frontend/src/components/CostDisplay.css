@@ -1,0 +1,65 @@
+.cost-display {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.cost-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #333;
+}
+
+.cost-icon {
+  font-size: 16px;
+}
+
+.cost-title {
+  font-size: 14px;
+}
+
+.cost-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cost-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.cost-label {
+  color: #666;
+}
+
+.cost-value {
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  color: #333;
+  font-weight: 500;
+}
+
+.cost-total {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 2px solid #ddd;
+  font-weight: 600;
+}
+
+.cost-total .cost-label {
+  color: #333;
+  font-weight: 600;
+}
+
+.cost-total .cost-value {
+  color: #4a90e2;
+  font-size: 16px;
+}

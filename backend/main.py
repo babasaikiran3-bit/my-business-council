@@ -253,6 +253,20 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
+            # Calculate and send cost information
+            stage1_cost = sum(r.get('cost_usd', 0.0) for r in stage1_results)
+            stage2_cost = sum(r.get('cost_usd', 0.0) for r in stage2_results)
+            stage3_cost = stage3_result.get('cost_usd', 0.0)
+            total_cost = stage1_cost + stage2_cost + stage3_cost
+
+            costs = {
+                'stage1_usd': round(stage1_cost, 6),
+                'stage2_usd': round(stage2_cost, 6),
+                'stage3_usd': round(stage3_cost, 6),
+                'total_usd': round(total_cost, 6)
+            }
+            yield f"data: {json.dumps({'type': 'costs', 'data': costs})}\n\n"
+
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task

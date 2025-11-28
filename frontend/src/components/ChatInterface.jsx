@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import CostDisplay from './CostDisplay';
 import './ChatInterface.css';
 
 export default function ChatInterface({
@@ -104,6 +105,9 @@ export default function ChatInterface({
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
+
+                  {/* Cost Display */}
+                  {msg.metadata?.costs && <CostDisplay costs={msg.metadata.costs} />}
                 </div>
               )}
             </div>

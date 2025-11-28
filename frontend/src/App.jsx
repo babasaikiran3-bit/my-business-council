@@ -150,6 +150,18 @@ function App() {
             });
             break;
 
+          case 'costs':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (!lastMsg.metadata) {
+                lastMsg.metadata = {};
+              }
+              lastMsg.metadata.costs = event.data;
+              return { ...prev, messages };
+            });
+            break;
+
           case 'title_complete':
             // Reload conversations to get updated title
             loadConversations();
