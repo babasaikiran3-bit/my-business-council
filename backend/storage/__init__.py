@@ -1,8 +1,10 @@
 """Storage module with pluggable backends."""
 
+import os
 from typing import Dict, Any, List, Optional
 from .base import StorageBackend
 from .json_storage import JSONStorageBackend
+from .sqlite_storage import SQLiteStorageBackend
 from ..config import DATA_DIR
 
 
@@ -14,15 +16,28 @@ def get_storage_backend() -> StorageBackend:
     """
     Get the configured storage backend.
 
+    The backend is selected via the STORAGE_BACKEND environment variable:
+    - "sqlite" (default): Use SQLite database storage
+    - "json": Use JSON file storage
+
+    For SQLite, the database path is determined by DB_PATH env var (default: data/conversations.db)
+    For JSON, the data directory is determined by DATA_DIR env var (default: data/conversations)
+
     Returns:
         Configured storage backend instance
     """
     global _storage_backend
 
     if _storage_backend is None:
-        # For now, always use JSON storage
-        # Later, this can be configured via environment variable
-        _storage_backend = JSONStorageBackend(DATA_DIR)
+        backend_type = os.getenv("STORAGE_BACKEND", "sqlite").lower()
+
+        if backend_type == "sqlite":
+            db_path = os.getenv("DB_PATH", "data/conversations.db")
+            _storage_backend = SQLiteStorageBackend(db_path)
+        elif backend_type == "json":
+            _storage_backend = JSONStorageBackend(DATA_DIR)
+        else:
+            raise ValueError(f"Unknown storage backend: {backend_type}. Valid options: 'sqlite', 'json'")
 
     return _storage_backend
 
@@ -97,6 +112,7 @@ def get_total_costs(start_date=None, end_date=None) -> Dict[str, Any]:
 __all__ = [
     'StorageBackend',
     'JSONStorageBackend',
+    'SQLiteStorageBackend',
     'get_storage_backend',
     'set_storage_backend',
     'create_conversation',
