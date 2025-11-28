@@ -59,12 +59,12 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 
 ## Running the Application
 
-**Option 1: Use the start script**
+### Option 1: Use the start script
 ```bash
 ./start.sh
 ```
 
-**Option 2: Run manually**
+### Option 2: Run manually
 
 Terminal 1 (Backend):
 ```bash
@@ -78,6 +78,37 @@ npm run dev
 ```
 
 Then open http://localhost:5173 in your browser.
+
+### Option 3: Run with Docker
+
+The project can be containerized and run using Docker Compose. This creates two separate containers: one for the backend and one for the frontend.
+
+**Prerequisites:**
+- Docker and Docker Compose installed
+- copy [backend/config.py](backend/config.py) to the project's root directory and update as described in point 3 of startup instruction.
+- `OPENROUTER_API_KEY` environment variable set (or exported in your shell)
+
+**Build and run:**
+```bash
+# Set your API key (if not already in .env)
+export OPENROUTER_API_KEY=sk-or-v1-...
+
+# Build and start containers
+docker compose build
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop containers
+docker compose down
+```
+
+**Access the application:**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8001
+
+**Note:** Conversation data is persisted in the `data/` directory, which is mounted as a volume in the backend container. For local development without Docker, you can still use `./start.sh` as before.
 
 ## Tech Stack
 
