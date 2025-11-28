@@ -112,4 +112,71 @@ export const api = {
       }
     }
   },
+
+  /**
+   * GitHub Integration
+   */
+
+  /**
+   * List all GitHub repositories for the authenticated user.
+   */
+  async listGithubRepos() {
+    const response = await fetch(`${API_BASE}/api/github/repos`);
+    if (!response.ok) {
+      if (response.status === 503) {
+        // GitHub not configured
+        return { repos: [], error: 'GitHub integration not configured' };
+      }
+      throw new Error('Failed to list GitHub repos');
+    }
+    return response.json();
+  },
+
+  /**
+   * Attach a GitHub repository to a conversation.
+   */
+  async attachRepo(conversationId, repoFullName) {
+    const encodedRepo = encodeURIComponent(repoFullName);
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/repos/${encodedRepo}`,
+      {
+        method: 'POST',
+      }
+    );
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to attach repository');
+    }
+    return response.json();
+  },
+
+  /**
+   * List repositories attached to a conversation.
+   */
+  async listConversationRepos(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/repos`
+    );
+    if (!response.ok) {
+      throw new Error('Failed to list conversation repos');
+    }
+    return response.json();
+  },
+
+  /**
+   * Detach a repository from a conversation.
+   */
+  async detachRepo(conversationId, repoFullName) {
+    const encodedRepo = encodeURIComponent(repoFullName);
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/repos/${encodedRepo}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to detach repository');
+    }
+    return response.json();
+  },
 };

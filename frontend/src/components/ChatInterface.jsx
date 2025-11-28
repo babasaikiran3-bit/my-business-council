@@ -4,6 +4,7 @@ import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import CostDisplay from './CostDisplay';
+import RepoSelector from './RepoSelector';
 import './ChatInterface.css';
 
 export default function ChatInterface({
@@ -12,6 +13,7 @@ export default function ChatInterface({
   isLoading,
 }) {
   const [input, setInput] = useState('');
+  const [attachedRepos, setAttachedRepos] = useState([]);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -125,24 +127,49 @@ export default function ChatInterface({
       </div>
 
       {conversation.messages.length === 0 && (
-        <form className="input-form" onSubmit={handleSubmit}>
-          <textarea
-            className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            rows={3}
+        <div className="input-section">
+          {/* Repository Selector */}
+          <RepoSelector
+            conversationId={conversation.id}
+            onReposChanged={setAttachedRepos}
           />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
-        </form>
+
+          {/* Attached Repos Indicator */}
+          {attachedRepos.length > 0 && (
+            <div className="attached-repos-indicator">
+              <div className="attached-repos-label">
+                📚 Context: {attachedRepos.length} {attachedRepos.length === 1 ? 'repository' : 'repositories'}
+              </div>
+              <div className="attached-repos-list">
+                {attachedRepos.map((repo) => (
+                  <span key={repo.full_name} className="repo-badge">
+                    {repo.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Message Input Form */}
+          <form className="input-form" onSubmit={handleSubmit}>
+            <textarea
+              className="message-input"
+              placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              rows={3}
+            />
+            <button
+              type="submit"
+              className="send-button"
+              disabled={!input.trim() || isLoading}
+            >
+              Send
+            </button>
+          </form>
+        </div>
       )}
     </div>
   );
