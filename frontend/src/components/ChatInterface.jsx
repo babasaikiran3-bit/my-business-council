@@ -14,6 +14,7 @@ export default function ChatInterface({
 }) {
   const [input, setInput] = useState('');
   const [attachedRepos, setAttachedRepos] = useState([]);
+  const [attachedFiles, setAttachedFiles] = useState([]);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -132,18 +133,24 @@ export default function ChatInterface({
           <RepoSelector
             conversationId={conversation.id}
             onReposChanged={setAttachedRepos}
+            onFilesChanged={setAttachedFiles}
           />
 
-          {/* Attached Repos Indicator */}
-          {attachedRepos.length > 0 && (
+          {/* Attached Context Indicator */}
+          {(attachedRepos.length > 0 || attachedFiles.length > 0) && (
             <div className="attached-repos-indicator">
               <div className="attached-repos-label">
-                📚 Context: {attachedRepos.length} {attachedRepos.length === 1 ? 'repository' : 'repositories'}
+                📚 Context Attached
               </div>
               <div className="attached-repos-list">
                 {attachedRepos.map((repo) => (
                   <span key={repo.full_name} className="repo-badge">
-                    {repo.name}
+                    🐙 {repo.name}
+                  </span>
+                ))}
+                {attachedFiles.map((file) => (
+                  <span key={file.id} className="repo-badge">
+                    📄 {file.filename}
                   </span>
                 ))}
               </div>

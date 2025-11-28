@@ -156,6 +156,44 @@ Conversation.repositories = relationship(
 )
 
 
+class File(Base):
+    """Uploaded file attached to a conversation."""
+
+    __tablename__ = 'files'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String, ForeignKey('conversations.id'), nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    content = Column(Text, nullable=False)  # File contents as text
+    mime_type = Column(String, nullable=True)  # e.g., "text/plain", "application/json"
+    size_bytes = Column(Integer, nullable=False)  # Original file size
+    uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationship
+    conversation = relationship("Conversation")
+
+    # Index for efficient queries
+    __table_args__ = (
+        Index('idx_conversation_files', conversation_id, uploaded_at),
+    )
+
+    def to_dict(self):
+        """Convert to dictionary."""
+        return {
+            "id": self.id,
+            "conversation_id": self.conversation_id,
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "size_bytes": self.size_bytes,
+            "uploaded_at": self.uploaded_at.isoformat() if self.uploaded_at else None,
+        }
+
+
+# Update Conversation model to include files relationship
+Conversation.files = relationship("File", back_populates="conversation", cascade="all, delete-orphan")
+File.conversation = relationship("Conversation", back_populates="files")
+
+
 # Virtual table for full-text search
 # Note: This will be created with raw SQL as SQLAlchemy doesn't directly support FTS5
 FTS_TABLE_SQL = """

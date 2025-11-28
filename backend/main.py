@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File as FastAPIFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -15,7 +15,7 @@ from .council import run_full_council, generate_conversation_title, stage1_colle
 from .logging_config import configure_logging, get_logger
 from .config import LOG_LEVEL
 from .github_client import get_github_client
-from .storage.models import Repository, ConversationRepository
+from .storage.models import Repository, ConversationRepository, File
 from .storage.sqlite_storage import SQLiteStorageBackend
 
 # Configure logging
@@ -176,12 +176,15 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    # Fetch attached repositories and build context
+    # Fetch attached repositories and files, build context
     repo_context = None
     backend = storage.get_storage_backend()
     if isinstance(backend, SQLiteStorageBackend):
         session = backend.SessionLocal()
         try:
+            context_parts = []
+
+            # Fetch GitHub repos
             conv_repos = session.query(ConversationRepository).filter_by(
                 conversation_id=conversation_id
             ).all()
@@ -194,8 +197,23 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
                         repo_summaries.append(repo.summary)
 
                 if repo_summaries:
-                    repo_context = "# Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries)
+                    context_parts.append("# GitHub Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries))
                     logger.info("repo_context_loaded", conversation_id=conversation_id, repos_count=len(repo_summaries))
+
+            # Fetch uploaded files
+            files = session.query(File).filter_by(conversation_id=conversation_id).all()
+
+            if files:
+                file_contents = []
+                for file in files:
+                    file_contents.append(f"## File: {file.filename}\n\n```\n{file.content}\n```")
+
+                context_parts.append("# Uploaded Files\n\n" + "\n\n".join(file_contents))
+                logger.info("file_context_loaded", conversation_id=conversation_id, files_count=len(files))
+
+            # Combine all context
+            if context_parts:
+                repo_context = "\n\n---\n\n".join(context_parts)
 
         finally:
             session.close()
@@ -255,12 +273,15 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    # Fetch attached repositories and build context
+    # Fetch attached repositories and files, build context
     repo_context = None
     backend = storage.get_storage_backend()
     if isinstance(backend, SQLiteStorageBackend):
         session = backend.SessionLocal()
         try:
+            context_parts = []
+
+            # Fetch GitHub repos
             conv_repos = session.query(ConversationRepository).filter_by(
                 conversation_id=conversation_id
             ).all()
@@ -273,8 +294,23 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                         repo_summaries.append(repo.summary)
 
                 if repo_summaries:
-                    repo_context = "# Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries)
+                    context_parts.append("# GitHub Repository Context\n\n" + "\n\n---\n\n".join(repo_summaries))
                     logger.info("repo_context_loaded", conversation_id=conversation_id, repos_count=len(repo_summaries))
+
+            # Fetch uploaded files
+            files = session.query(File).filter_by(conversation_id=conversation_id).all()
+
+            if files:
+                file_contents = []
+                for file in files:
+                    file_contents.append(f"## File: {file.filename}\n\n```\n{file.content}\n```")
+
+                context_parts.append("# Uploaded Files\n\n" + "\n\n".join(file_contents))
+                logger.info("file_context_loaded", conversation_id=conversation_id, files_count=len(files))
+
+            # Combine all context
+            if context_parts:
+                repo_context = "\n\n---\n\n".join(context_parts)
 
         finally:
             session.close()
@@ -568,6 +604,194 @@ async def detach_repo_from_conversation(conversation_id: str, repo_full_name: st
     except Exception as e:
         session.rollback()
         logger.error("detach_repo_failed", conversation_id=conversation_id, repo=repo_full_name, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+
+# ============================================================================
+# File Upload Endpoints
+# ============================================================================
+
+@app.post("/api/conversations/{conversation_id}/files")
+async def upload_file(conversation_id: str, file: UploadFile = FastAPIFile(...)):
+    """
+    Upload a file and attach it to a conversation.
+
+    Args:
+        conversation_id: ID of the conversation
+        file: File to upload
+
+    Returns:
+        File metadata
+    """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
+    # Check if conversation exists
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    backend = storage.get_storage_backend()
+    if not isinstance(backend, SQLiteStorageBackend):
+        raise HTTPException(status_code=501, detail="File upload requires SQLite storage backend")
+
+    # Read file contents
+    try:
+        contents = await file.read()
+
+        # Try to decode as text
+        try:
+            content_text = contents.decode('utf-8')
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be text-based (UTF-8 encoded)")
+
+        # Limit file size (5MB for text files)
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(contents) > max_size:
+            raise HTTPException(status_code=400, detail=f"File too large. Maximum size is {max_size / 1024 / 1024}MB")
+
+        # Create file record in database
+        session = backend.SessionLocal()
+        try:
+            file_record = File(
+                conversation_id=conversation_id,
+                filename=file.filename,
+                content=content_text,
+                mime_type=file.content_type,
+                size_bytes=len(contents)
+            )
+            session.add(file_record)
+            session.commit()
+            session.refresh(file_record)
+
+            logger.info("file_uploaded", conversation_id=conversation_id, filename=file.filename, size=len(contents))
+
+            return {
+                "message": "File uploaded successfully",
+                "file": file_record.to_dict()
+            }
+
+        except Exception as e:
+            session.rollback()
+            logger.error("file_upload_failed", conversation_id=conversation_id, filename=file.filename, error=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            session.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("file_read_failed", filename=file.filename, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+
+@app.get("/api/conversations/{conversation_id}/files")
+async def list_conversation_files(conversation_id: str):
+    """
+    List all files attached to a conversation.
+
+    Args:
+        conversation_id: ID of the conversation
+
+    Returns:
+        List of file metadata (without content)
+    """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
+    # Check if conversation exists
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    backend = storage.get_storage_backend()
+    if not isinstance(backend, SQLiteStorageBackend):
+        return {"files": []}
+
+    session = backend.SessionLocal()
+    try:
+        files = session.query(File).filter_by(conversation_id=conversation_id).order_by(File.uploaded_at.desc()).all()
+        return {"files": [f.to_dict() for f in files]}
+    finally:
+        session.close()
+
+
+@app.get("/api/conversations/{conversation_id}/files/{file_id}")
+async def get_file(conversation_id: str, file_id: int):
+    """
+    Get file content and metadata.
+
+    Args:
+        conversation_id: ID of the conversation
+        file_id: ID of the file
+
+    Returns:
+        File with content
+    """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
+    backend = storage.get_storage_backend()
+    if not isinstance(backend, SQLiteStorageBackend):
+        raise HTTPException(status_code=501, detail="File operations require SQLite storage backend")
+
+    session = backend.SessionLocal()
+    try:
+        file_record = session.query(File).filter_by(id=file_id, conversation_id=conversation_id).first()
+
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        return {
+            **file_record.to_dict(),
+            "content": file_record.content
+        }
+    finally:
+        session.close()
+
+
+@app.delete("/api/conversations/{conversation_id}/files/{file_id}")
+async def delete_file(conversation_id: str, file_id: int):
+    """
+    Delete a file from a conversation.
+
+    Args:
+        conversation_id: ID of the conversation
+        file_id: ID of the file
+
+    Returns:
+        Success message
+    """
+    # Validate conversation ID
+    conversation_id = validate_conversation_id(conversation_id)
+
+    backend = storage.get_storage_backend()
+    if not isinstance(backend, SQLiteStorageBackend):
+        raise HTTPException(status_code=501, detail="File operations require SQLite storage backend")
+
+    session = backend.SessionLocal()
+    try:
+        file_record = session.query(File).filter_by(id=file_id, conversation_id=conversation_id).first()
+
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        filename = file_record.filename
+        session.delete(file_record)
+        session.commit()
+
+        logger.info("file_deleted", conversation_id=conversation_id, file_id=file_id, filename=filename)
+
+        return {"message": "File deleted successfully"}
+
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception as e:
+        session.rollback()
+        logger.error("file_delete_failed", conversation_id=conversation_id, file_id=file_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()

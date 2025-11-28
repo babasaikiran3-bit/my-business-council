@@ -3,6 +3,8 @@
 import asyncio
 import sys
 import json
+import os
+from pathlib import Path
 from typing import List, Optional
 
 import click
@@ -211,6 +213,89 @@ def build_repo_context(repos: List[str]) -> Optional[str]:
         session.close()
 
 
+def build_file_context(file_paths: List[str], dir_paths: List[str]) -> Optional[str]:
+    """Build file context from local files and directories."""
+    all_files = []
+    max_file_size = 5 * 1024 * 1024  # 5MB limit
+
+    # Collect individual files
+    for file_path in file_paths:
+        path = Path(file_path)
+        if not path.exists():
+            console.print(f"[yellow]Warning: File not found: {file_path}[/yellow]")
+            continue
+        if not path.is_file():
+            console.print(f"[yellow]Warning: Not a file: {file_path}[/yellow]")
+            continue
+        all_files.append(path)
+
+    # Collect files from directories
+    for dir_path in dir_paths:
+        path = Path(dir_path)
+        if not path.exists():
+            console.print(f"[yellow]Warning: Directory not found: {dir_path}[/yellow]")
+            continue
+        if not path.is_dir():
+            console.print(f"[yellow]Warning: Not a directory: {dir_path}[/yellow]")
+            continue
+
+        # Recursively find all text files
+        for file_path in path.rglob('*'):
+            if file_path.is_file():
+                # Skip common binary/large files
+                skip_extensions = {'.pyc', '.pyo', '.so', '.dylib', '.dll', '.exe', '.bin',
+                                 '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.pdf',
+                                 '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
+                                 '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv',
+                                 '.db', '.sqlite', '.sqlite3'}
+                skip_dirs = {'node_modules', '.git', '__pycache__', 'venv', '.venv',
+                           'build', 'dist', '.next', '.nuxt', 'coverage'}
+
+                # Check if file is in a skip directory
+                if any(skip_dir in file_path.parts for skip_dir in skip_dirs):
+                    continue
+
+                # Check file extension
+                if file_path.suffix.lower() in skip_extensions:
+                    continue
+
+                all_files.append(file_path)
+
+    if not all_files:
+        return None
+
+    # Read file contents
+    file_contents = []
+    total_bytes = 0
+
+    for file_path in all_files:
+        try:
+            # Check file size
+            file_size = file_path.stat().st_size
+            if file_size > max_file_size:
+                console.print(f"[yellow]Warning: Skipping large file (>{max_file_size/1024/1024:.1f}MB): {file_path}[/yellow]")
+                continue
+
+            # Try to read as UTF-8 text
+            content = file_path.read_text(encoding='utf-8')
+            file_contents.append(f"## File: {file_path}\n\n```\n{content}\n```")
+            total_bytes += file_size
+            console.print(f"[green]✓[/green] Loaded {file_path} ({file_size/1024:.1f} KB)")
+
+        except UnicodeDecodeError:
+            console.print(f"[yellow]Warning: Skipping binary file: {file_path}[/yellow]")
+            continue
+        except Exception as e:
+            console.print(f"[red]Error reading {file_path}: {e}[/red]")
+            continue
+
+    if not file_contents:
+        return None
+
+    console.print(f"\n[green]📎 Loaded {len(file_contents)} files ({total_bytes/1024:.1f} KB total)[/green]\n")
+    return "# Uploaded Files\n\n" + "\n\n".join(file_contents)
+
+
 @click.group()
 @click.version_option(version="0.1.0")
 def main():
@@ -227,17 +312,22 @@ def main():
 @main.command()
 @click.argument('question', required=False)
 @click.option('--repo', '-r', multiple=True, help='GitHub repository (owner/repo). Can be used multiple times.')
+@click.option('--file', multiple=True, help='Local file to include as context. Can be used multiple times.')
+@click.option('--dir', multiple=True, help='Local directory to include (recursively). Can be used multiple times.')
 @click.option('--format', '-f', type=click.Choice(['text', 'json', 'markdown']), default='text', help='Output format')
 @click.option('--no-costs', is_flag=True, help='Hide cost information')
 @click.option('--stage', type=click.Choice(['1', '2', '3', 'all']), default='all', help='Show only specific stage')
 @click.option('--stdin', is_flag=True, help='Read question from stdin')
-def ask(question, repo, format, no_costs, stage, stdin):
+def ask(question, repo, file, dir, format, no_costs, stage, stdin):
     """Ask the council a question.
 
     Examples:
         llm-council ask "What is the best Python web framework?"
         llm-council ask "Review this architecture" --repo myorg/myapp
         llm-council ask "Analyze these projects" -r user/repo1 -r user/repo2
+        llm-council ask "Review this code" --file main.py --file utils.py
+        llm-council ask "Analyze this project" --dir ./src
+        llm-council ask "Review everything" --repo org/repo --dir ./local-code
         echo "Explain async/await" | llm-council ask --stdin
         llm-council ask "..." --format json > output.json
     """
@@ -252,12 +342,25 @@ def ask(question, repo, format, no_costs, stage, stdin):
         console.print("   or: echo \"Your question\" | llm-council ask --stdin")
         sys.exit(1)
 
+    # Build context from repos and files
+    context_parts = []
+
     # Build repo context if repos specified
-    repo_context = None
     if repo:
         repo_context = build_repo_context(list(repo))
         if repo_context:
-            console.print(f"[green]📚 Loaded {len(repo)} repositories into context[/green]\n")
+            context_parts.append(repo_context)
+
+    # Build file context if files or dirs specified
+    if file or dir:
+        file_context = build_file_context(list(file), list(dir))
+        if file_context:
+            context_parts.append(file_context)
+
+    # Combine all context
+    combined_context = None
+    if context_parts:
+        combined_context = "\n\n---\n\n".join(context_parts)
 
     # Show question
     console.print(Panel(
@@ -271,7 +374,7 @@ def ask(question, repo, format, no_costs, stage, stdin):
     # Run council
     show_progress = format == 'text'
     stage1, stage2, stage3, metadata = asyncio.run(
-        run_council_with_progress(question, repo_context, show_progress=show_progress)
+        run_council_with_progress(question, combined_context, show_progress=show_progress)
     )
 
     # Output based on format

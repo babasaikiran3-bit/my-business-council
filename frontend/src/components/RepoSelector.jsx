@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
+import FileUploader from './FileUploader';
 import './RepoSelector.css';
 
-export default function RepoSelector({ conversationId, onReposChanged }) {
+export default function RepoSelector({ conversationId, onReposChanged, onFilesChanged }) {
   const [isOpen, setIsOpen] = useState(false);
   const [githubRepos, setGithubRepos] = useState([]);
   const [attachedRepos, setAttachedRepos] = useState([]);
@@ -164,7 +165,10 @@ export default function RepoSelector({ conversationId, onReposChanged }) {
             )}
           </div>
 
-          {/* Future: Add more context types here (Files, Images, etc.) */}
+          <FileUploader
+            conversationId={conversationId}
+            onFilesChanged={onFilesChanged}
+          />
         </div>
       )}
     </div>

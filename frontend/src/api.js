@@ -179,4 +179,71 @@ export const api = {
     }
     return response.json();
   },
+
+  /**
+   * File Operations
+   */
+
+  /**
+   * Upload a file to a conversation.
+   */
+  async uploadFile(conversationId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/files`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to upload file');
+    }
+    return response.json();
+  },
+
+  /**
+   * List files attached to a conversation.
+   */
+  async listFiles(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/files`
+    );
+    if (!response.ok) {
+      throw new Error('Failed to list files');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get a specific file (with content).
+   */
+  async getFile(conversationId, fileId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/files/${fileId}`
+    );
+    if (!response.ok) {
+      throw new Error('Failed to get file');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a file from a conversation.
+   */
+  async deleteFile(conversationId, fileId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/files/${fileId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to delete file');
+    }
+    return response.json();
+  },
 };
