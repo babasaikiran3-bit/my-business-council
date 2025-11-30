@@ -47,6 +47,23 @@ export const api = {
   },
 
   /**
+   * Improve a prompt using an LLM.
+   */
+  async improvePrompt(content) {
+    const response = await fetch(`${API_BASE}/api/improve-prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to improve prompt');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {

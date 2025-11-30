@@ -19,6 +19,10 @@ COUNCIL_MODELS = [
 # Chairman model - synthesizes final response
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 
+# Prompt improver model - fast model for quick prompt enhancement
+# Using the same model as chairman for reliability; can be changed to a faster model
+PROMPT_IMPROVER_MODEL = "google/gemini-3-pro-preview"
+
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 

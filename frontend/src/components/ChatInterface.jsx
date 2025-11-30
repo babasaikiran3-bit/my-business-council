@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { api } from '../api';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
@@ -11,6 +12,8 @@ export default function ChatInterface({
   isLoading,
 }) {
   const [input, setInput] = useState('');
+  const [isImproving, setIsImproving] = useState(false);
+  const [originalPrompt, setOriginalPrompt] = useState(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -23,9 +26,10 @@ export default function ChatInterface({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (input.trim() && !isLoading) {
+    if (input.trim() && !isLoading && !isImproving) {
       onSendMessage(input);
       setInput('');
+      setOriginalPrompt(null);
     }
   };
 
@@ -34,6 +38,29 @@ export default function ChatInterface({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
+    }
+  };
+
+  const handleImprovePrompt = async () => {
+    if (!input.trim() || isImproving || isLoading) return;
+
+    setIsImproving(true);
+    setOriginalPrompt(input);
+
+    try {
+      const result = await api.improvePrompt(input);
+      setInput(result.improved_prompt);
+    } catch (error) {
+      console.error('Failed to improve prompt:', error);
+      setOriginalPrompt(null);
+    }
+    setIsImproving(false);
+  };
+
+  const handleUndoImprovement = () => {
+    if (originalPrompt) {
+      setInput(originalPrompt);
+      setOriginalPrompt(null);
     }
   };
 
@@ -122,22 +149,59 @@ export default function ChatInterface({
 
       {conversation.messages.length === 0 && (
         <form className="input-form" onSubmit={handleSubmit}>
-          <textarea
-            className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            rows={3}
-          />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
+          <div className="input-section">
+            <textarea
+              className="message-input"
+              placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading || isImproving}
+              rows={3}
+            />
+
+            {/* Show original prompt for comparison when improved */}
+            {originalPrompt && (
+              <div className="original-prompt-notice">
+                <div className="original-prompt-header">
+                  <span>📝 Original prompt:</span>
+                  <button
+                    type="button"
+                    className="undo-button"
+                    onClick={handleUndoImprovement}
+                  >
+                    ↩ Undo
+                  </button>
+                </div>
+                <div className="original-prompt-text">{originalPrompt}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="button-group">
+            <button
+              type="button"
+              className="improve-button"
+              onClick={handleImprovePrompt}
+              disabled={!input.trim() || isImproving || isLoading}
+            >
+              {isImproving ? (
+                <>
+                  <span className="spinner spinner-small"></span>
+                  <span>Improving...</span>
+                </>
+              ) : (
+                '✨ Improve Prompt'
+              )}
+            </button>
+            <button
+              type="submit"
+              className="send-button"
+              disabled={!input.trim() || isLoading || isImproving}
+            >
+              Send
+            </button>
+          </div>
         </form>
       )}
     </div>

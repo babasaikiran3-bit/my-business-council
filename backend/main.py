@@ -10,7 +10,7 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, improve_user_prompt
 
 app = FastAPI(title="LLM Council API")
 
@@ -34,6 +34,11 @@ class SendMessageRequest(BaseModel):
     content: str
 
 
+class ImprovePromptRequest(BaseModel):
+    """Request to improve a prompt."""
+    content: str
+
+
 class ConversationMetadata(BaseModel):
     """Conversation metadata for list view."""
     id: str
@@ -54,6 +59,13 @@ class Conversation(BaseModel):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.post("/api/improve-prompt")
+async def improve_prompt(request: ImprovePromptRequest):
+    """Improve a user's prompt using an LLM."""
+    improved = await improve_user_prompt(request.content)
+    return {"improved_prompt": improved}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])

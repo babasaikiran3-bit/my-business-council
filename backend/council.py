@@ -2,7 +2,36 @@
 
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
+
+
+async def improve_user_prompt(original_prompt: str) -> str:
+    """
+    Use an LLM to improve the user's prompt.
+
+    Args:
+        original_prompt: The user's original prompt
+
+    Returns:
+        The improved prompt text
+    """
+    system_prompt = """You are a prompt improvement specialist. Your task is to rewrite the user's prompt to be:
+- Clearer and more specific
+- Well-structured with context where helpful
+- More likely to elicit comprehensive, high-quality responses
+
+Rules:
+- Preserve the user's original intent completely
+- Return ONLY the improved prompt text, no explanations or preamble
+- If the prompt is already excellent, return it unchanged"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": original_prompt}
+    ]
+
+    response = await query_model(PROMPT_IMPROVER_MODEL, messages)
+    return response.get('content', original_prompt) if response else original_prompt
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
