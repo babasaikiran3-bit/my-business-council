@@ -11,7 +11,6 @@ export default function Stage1({ responses }) {
 
   return (
     <div className="stage stage1">
-      <h3 className="stage-title">Stage 1: Individual Responses</h3>
 
       <div className="tabs">
         {responses.map((resp, index) => (
@@ -27,9 +26,15 @@ export default function Stage1({ responses }) {
 
       <div className="tab-content">
         <div className="model-name">{responses[activeTab].model}</div>
-        <div className="response-text markdown-content">
-          <ReactMarkdown>{responses[activeTab].response}</ReactMarkdown>
-        </div>
+        {responses[activeTab].error ? (
+          <div className="error-message">
+            ⚠️ <strong>Error:</strong> {responses[activeTab].error}
+          </div>
+        ) : (
+          <div className="response-text markdown-content">
+            <ReactMarkdown>{responses[activeTab].response}</ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

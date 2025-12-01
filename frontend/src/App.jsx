@@ -1,199 +1,157 @@
-import { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import ChatInterface from './components/ChatInterface';
-import { api } from './api';
+
+import { useState } from 'react';
+import Stage1 from './components/Stage1';
+import Stage2 from './components/Stage2';
+import Stage3 from './components/Stage3';
+import CollapsibleSection from './components/CollapsibleSection';
 import './App.css';
 
 function App() {
-  const [conversations, setConversations] = useState([]);
-  const [currentConversationId, setCurrentConversationId] = useState(null);
-  const [currentConversation, setCurrentConversation] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
+  // State for each stage
+  const [stage1Data, setStage1Data] = useState(null);
+  const [stage2Data, setStage2Data] = useState(null);
+  const [stage3Data, setStage3Data] = useState(null);
+  const [metadata, setMetadata] = useState(null);
 
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
+  // Loading states
+  const [loadingStage1, setLoadingStage1] = useState(false);
+  const [loadingStage2, setLoadingStage2] = useState(false);
+  const [loadingStage3, setLoadingStage3] = useState(false);
 
-  const loadConversations = async () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!question.trim()) return;
+
+    // Reset all states
+    setIsProcessing(true);
+    setStage1Data(null);
+    setStage2Data(null);
+    setStage3Data(null);
+    setMetadata(null);
+
     try {
-      const convs = await api.listConversations();
-      setConversations(convs);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
-    }
-  };
-
-  const loadConversation = async (id) => {
-    try {
-      const conv = await api.getConversation(id);
-      setCurrentConversation(conv);
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    }
-  };
-
-  const handleNewConversation = async () => {
-    try {
-      const newConv = await api.createConversation();
-      setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
-        ...conversations,
-      ]);
-      setCurrentConversationId(newConv.id);
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-    }
-  };
-
-  const handleSelectConversation = (id) => {
-    setCurrentConversationId(id);
-  };
-
-  const handleSendMessage = async (content) => {
-    if (!currentConversationId) return;
-
-    setIsLoading(true);
-    try {
-      // Optimistically add user message to UI
-      const userMessage = { role: 'user', content };
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      }));
-
-      // Create a partial assistant message that will be updated progressively
-      const assistantMessage = {
-        role: 'assistant',
-        stage1: null,
-        stage2: null,
-        stage3: null,
-        metadata: null,
-        loading: {
-          stage1: false,
-          stage2: false,
-          stage3: false,
-        },
-      };
-
-      // Add the partial assistant message
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, assistantMessage],
-      }));
-
-      // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
-        switch (eventType) {
-          case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
-            break;
-
-          case 'complete':
-            // Stream complete, reload conversations list
-            loadConversations();
-            setIsLoading(false);
-            break;
-
-          case 'error':
-            console.error('Stream error:', event.message);
-            setIsLoading(false);
-            break;
-
-          default:
-            console.log('Unknown event type:', eventType);
-        }
+      // --- Stage 1 ---
+      setLoadingStage1(true);
+      const res1 = await fetch('http://localhost:8001/api/evaluate/stage1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
       });
+      if (!res1.ok) throw new Error('Stage 1 failed');
+      const data1 = await res1.json();
+      setStage1Data(data1.stage1);
+      setLoadingStage1(false);
+
+      // --- Stage 2 ---
+      setLoadingStage2(true);
+      const res2 = await fetch('http://localhost:8001/api/evaluate/stage2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          stage1_results: data1.stage1
+        }),
+      });
+      if (!res2.ok) throw new Error('Stage 2 failed');
+      const data2 = await res2.json();
+      setStage2Data(data2.stage2);
+      setMetadata(data2.metadata);
+      setLoadingStage2(false);
+
+      // --- Stage 3 ---
+      setLoadingStage3(true);
+      const res3 = await fetch('http://localhost:8001/api/evaluate/stage3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage2_results: data2.stage2,
+          label_to_model: data2.metadata.label_to_model
+        }),
+      });
+      if (!res3.ok) throw new Error('Stage 3 failed');
+      const data3 = await res3.json();
+      setStage3Data(data3.stage3);
+      setLoadingStage3(false);
+
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: prev.messages.slice(0, -2),
-      }));
-      setIsLoading(false);
+      console.error('Error:', error);
+      alert('Evaluation failed. Please check console for details.');
+      setLoadingStage1(false);
+      setLoadingStage2(false);
+      setLoadingStage3(false);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   return (
     <div className="app">
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
-      />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-      />
+      <div className="main-content">
+        <header className="app-header">
+          <h1>Open Cross-Evaluation for Language Models</h1>
+          <p>Anonymous peer scoring across LLMs for toxicity, bias, hallucinations, and political tilt.</p>
+        </header>
+
+        <form onSubmit={handleSubmit} className="query-form">
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Enter your question here..."
+            rows={4}
+            disabled={isProcessing}
+          />
+          <button type="submit" disabled={isProcessing || !question.trim()}>
+            {isProcessing ? 'Evaluating...' : 'Evaluate'}
+          </button>
+        </form>
+
+        <div className="results-container">
+          {/* Stage 1 Section */}
+          {(loadingStage1 || stage1Data) && (
+            <CollapsibleSection title="Stage 1: Individual Responses" defaultOpen={true}>
+              {loadingStage1 ? (
+                <div className="loading-indicator">
+                  <div className="spinner"></div>
+                  <p>Gathering responses from council models...</p>
+                </div>
+              ) : (
+                <Stage1 responses={stage1Data} />
+              )}
+            </CollapsibleSection>
+          )}
+
+          {/* Stage 2 Section */}
+          {(loadingStage2 || stage2Data) && (
+            <CollapsibleSection title="Stage 2: Peer Evaluations" defaultOpen={true}>
+              {loadingStage2 ? (
+                <div className="loading-indicator">
+                  <div className="spinner"></div>
+                  <p>Models are evaluating each other...</p>
+                </div>
+              ) : (
+                <Stage2 rankings={stage2Data} labelToModel={metadata?.label_to_model} />
+              )}
+            </CollapsibleSection>
+          )}
+
+          {/* Stage 3 Section */}
+          {(loadingStage3 || stage3Data) && (
+            <CollapsibleSection title="Stage 3: Final Scoreboard" defaultOpen={true}>
+              {loadingStage3 ? (
+                <div className="loading-indicator">
+                  <div className="spinner"></div>
+                  <p>Calculating final scores...</p>
+                </div>
+              ) : (
+                <Stage3 finalResponse={stage3Data} />
+              )}
+            </CollapsibleSection>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

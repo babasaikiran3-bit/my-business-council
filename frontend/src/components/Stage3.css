@@ -1,25 +1,83 @@
-.stage3 {
-  background: #f0fff0;
-  border-color: #c8e6c8;
-}
-
-.final-response {
-  background: #ffffff;
-  padding: 20px;
+.scoreboard-container {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
   border-radius: 6px;
-  border: 1px solid #c8e6c8;
 }
 
-.chairman-label {
-  color: #2d8a2d;
-  font-size: 12px;
-  font-family: monospace;
-  margin-bottom: 12px;
+.scoreboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  min-width: 600px;
+}
+
+.scoreboard-table th {
+  background: #f9fafb;
+  padding: 12px 16px;
+  text-align: left;
   font-weight: 600;
+  color: #4b5563;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.final-text {
-  color: #333;
-  line-height: 1.7;
-  font-size: 15px;
+.scoreboard-table td {
+  padding: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #111827;
+  font-size: 0.95rem;
+}
+
+.scoreboard-table tr:last-child td {
+  border-bottom: none;
+}
+
+.model-cell {
+  font-weight: 500;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rank-badge {
+  color: #6b7280;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+}
+
+.scoreboard-table tr:first-child .rank-badge {
+  background: #000000;
+  color: #ffffff;
+  border-color: #000000;
+}
+
+.score-badge {
+  display: inline-block;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.avg-score {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #000000;
+}
+
+.scoreboard-legend {
+  margin-top: 12px;
+  padding: 8px;
+  font-size: 0.8rem;
+  color: #6b7280;
+  text-align: left;
 }

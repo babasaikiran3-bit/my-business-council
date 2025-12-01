@@ -41,6 +41,16 @@ async def query_model(
             response.raise_for_status()
 
             data = response.json()
+            
+            # Check if response has expected structure
+            if 'choices' not in data or not data['choices']:
+                error_msg = data.get('error', {}).get('message', 'Invalid API response structure')
+                print(f"Error querying model {model}: {error_msg}")
+                return {
+                    'error': error_msg,
+                    'content': None
+                }
+            
             message = data['choices'][0]['message']
 
             return {
@@ -48,9 +58,20 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.HTTPStatusError as e:
+        # Handle HTTP errors (429, 503, etc.)
+        error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        print(f"Error querying model {model}: {error_msg}")
+        return {
+            'error': error_msg,
+            'content': None
+        }
     except Exception as e:
         print(f"Error querying model {model}: {e}")
-        return None
+        return {
+            'error': str(e),
+            'content': None
+        }
 
 
 async def query_models_parallel(

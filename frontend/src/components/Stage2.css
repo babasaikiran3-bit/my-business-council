@@ -1,153 +1,123 @@
-.stage2 {
-  background: #fafafa;
-}
-
-.stage2 h4 {
-  margin: 20px 0 8px 0;
-  color: #333;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.stage2 h4:first-of-type {
-  margin-top: 0;
-}
-
-.stage-description {
-  margin: 0 0 12px 0;
-  color: #666;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.aggregate-rankings {
-  background: #f0f7ff;
-  padding: 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  border: 2px solid #d0e7ff;
-}
-
-.aggregate-rankings h4 {
-  margin: 0 0 12px 0;
-  color: #2a7ae2;
-  font-size: 15px;
-}
-
-.aggregate-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.aggregate-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #d0e7ff;
-}
-
-.rank-position {
-  color: #2a7ae2;
-  font-weight: 700;
-  font-size: 16px;
-  min-width: 35px;
-}
-
-.rank-model {
-  flex: 1;
-  color: #333;
-  font-family: monospace;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.rank-score {
-  color: #666;
-  font-size: 13px;
-  font-family: monospace;
-}
-
 .stage2 .tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 24px;
   flex-wrap: wrap;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
 }
 
 .stage2 .tab {
   padding: 8px 16px;
-  background: #ffffff;
-  border: 1px solid #d0d0d0;
-  border-radius: 6px 6px 0 0;
-  color: #666;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #6b7280;
   transition: all 0.2s;
 }
 
 .stage2 .tab:hover {
-  background: #f0f0f0;
-  color: #333;
-  border-color: #4a90e2;
+  background: #f3f4f6;
+  color: #111827;
+  border-color: #d1d5db;
 }
 
 .stage2 .tab.active {
-  background: #ffffff;
-  color: #4a90e2;
-  border-color: #4a90e2;
-  border-bottom-color: #ffffff;
+  background: #111827;
+  color: white;
+  border-color: #111827;
+}
+
+.scorecards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.scorecard {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.scorecard h4 {
+  margin: 0;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 1rem;
+  color: #111827;
   font-weight: 600;
 }
 
-.stage2 .tab-content {
-  background: #ffffff;
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  margin-bottom: 20px;
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1px;
+  background: #e5e7eb;
+  /* Creates borders between grid items */
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.metric-item {
+  background: white;
+  padding: 20px;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.metric-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.metric-score {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.metric-reasoning {
+  font-size: 0.9rem;
+  color: #4b5563;
+  line-height: 1.5;
 }
 
 .ranking-model {
-  color: #888;
-  font-size: 12px;
-  font-family: monospace;
-  margin-bottom: 12px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #111827;
+  font-size: 1.1rem;
 }
 
-.ranking-content {
-  color: #333;
-  line-height: 1.6;
-  font-size: 14px;
+.raw-response-toggle {
+  margin-top: 24px;
+  padding: 12px;
+  border: 1px dashed #e5e7eb;
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 0.9rem;
+  cursor: pointer;
 }
 
-.parsed-ranking {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 2px solid #e0e0e0;
-}
-
-.parsed-ranking strong {
-  color: #2a7ae2;
-  font-size: 13px;
-}
-
-.parsed-ranking ol {
-  margin: 8px 0 0 0;
-  padding-left: 24px;
-  color: #333;
-}
-
-.parsed-ranking li {
-  margin: 4px 0;
-  font-family: monospace;
-  font-size: 13px;
-}
-
-.rank-count {
-  color: #999;
-  font-size: 12px;
+.raw-response-toggle:hover {
+  background: #f9fafb;
+  color: #111827;
+  border-color: #d1d5db;
 }
