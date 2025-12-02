@@ -76,3 +76,28 @@
   color: #999;
   font-size: 12px;
 }
+
+/* Disabled state while loading */
+.new-conversation-btn:disabled {
+  background: #9fc5f0;
+  border-color: #9fc5f0;
+  cursor: not-allowed;
+}
+
+.conversation-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.conversation-item.disabled:hover {
+  background: transparent;
+}
+
+.sidebar-loading-warning {
+  padding: 8px 16px;
+  background: #fff3cd;
+  color: #856404;
+  font-size: 12px;
+  text-align: center;
+  border-bottom: 1px solid #e0e0e0;
+}

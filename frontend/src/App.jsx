@@ -188,6 +188,7 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        isLoading={isLoading}
       />
       <ChatInterface
         conversation={currentConversation}
