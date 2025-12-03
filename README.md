@@ -32,19 +32,30 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### 2. Choose Your LLM Provider
 
-Create a `.env` file in the project root:
+LLM Council supports three provider modes:
+
+- **OpenRouter** (cloud-based): Access to 100+ models via API, requires paid credits
+- **Ollama** (local): Run models on your own hardware, completely free and private
+- **Mixed** (hybrid): Combine both providers for cost/quality optimization
+
+### 3. Provider Configuration
+
+#### Option A: OpenRouter (Cloud-based)
+
+**1. Get API Key**
+
+Sign up at [openrouter.ai](https://openrouter.ai/) and get your API key. Make sure to purchase credits or enable automatic top-up.
+
+**2. Create `.env` file**
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
-
-### 3. Configure Models (Optional)
-
-Edit `backend/config.py` to customize the council:
+**3. Configure models in `backend/config.py`** (optional)
 
 ```python
 COUNCIL_MODELS = [
@@ -56,6 +67,97 @@ COUNCIL_MODELS = [
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
+
+See available models at [openrouter.ai/models](https://openrouter.ai/models)
+
+#### Option B: Ollama (Local)
+
+**1. Install Ollama**
+
+```bash
+# Linux & Mac
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Windows
+# Download from https://ollama.com/download
+```
+
+**2. Start Ollama service**
+
+```bash
+# Ollama typically starts automatically after installation
+# To verify it's running:
+curl http://localhost:11434/api/version
+```
+
+**3. Pull models**
+
+```bash
+# Download the models you want to use
+ollama pull llama3.1:latest
+ollama pull mistral:latest
+ollama pull qwen2.5:3b
+ollama pull phi3:latest
+```
+
+See available models at [ollama.com/library](https://ollama.com/library)
+
+**4. Create `.env` file**
+
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+**5. Configure models in `backend/config.py`** (optional)
+
+```python
+COUNCIL_MODELS = [
+    "llama3.1:8b",
+    "mistral:latest",
+    "qwen2.5:3b",
+    "phi3:latest",
+]
+
+CHAIRMAN_MODEL = "llama3.1:8b"
+```
+
+#### Option C: Mixed (Hybrid)
+
+Combine local and cloud models for cost optimization.
+
+**1. Set up both providers**
+
+Follow installation steps for both OpenRouter and Ollama above.
+
+**2. Create `.env` file**
+
+```bash
+LLM_PROVIDER=mixed
+OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+**3. Configure models in `backend/config.py`** (optional)
+
+Prefix each model with its provider:
+
+```python
+COUNCIL_MODELS = [
+    "ollama:llama3.1:8b",              # Local, fast, free
+    "ollama:mistral:latest",           # Local, fast, free
+    "openrouter:google/gemini-2.5-flash-lite",  # Cloud, paid
+    "openrouter:anthropic/claude-3.5-haiku",  # Cloud, paid
+]
+
+CHAIRMAN_MODEL = "openrouter:google/gemini-2.5-flash-lite"
+```
+
+**Benefits of mixed mode:**
+- Use free local models for council deliberation
+- Use premium cloud models for final synthesis
+- Optimize cost vs quality trade-offs
+- Keep sensitive data local while using cloud for general queries
 
 ## Running the Application
 
@@ -81,7 +183,7 @@ Then open http://localhost:5173 in your browser.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
+- **Backend:** FastAPI (Python 3.10+), async httpx, multi-provider support (OpenRouter, Ollama)
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript

@@ -8,19 +8,70 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 ## Architecture
 
+### Multi-Provider System
+
+The application now supports three LLM provider modes via a provider abstraction layer:
+
+1. **OpenRouter Mode** (default): All models use OpenRouter API (cloud-based, paid)
+2. **Ollama Mode**: All models use local Ollama server (self-hosted, free)
+3. **Mixed Mode**: Combine both providers with explicit prefixes per model
+
+**Key Design Decisions:**
+- **Backward Compatibility**: Existing OpenRouter configs work without changes
+- **Zero-Configuration Local**: Ollama mode requires no API keys
+- **Cost Optimization**: Mixed mode allows free local + premium cloud models
+- **Provider Abstraction**: Clean separation between provider logic and core council logic
+
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `LLM_PROVIDER` (determines provider mode: openrouter/ollama/mixed)
+- Contains `COUNCIL_MODELS` (list of model identifiers, format depends on mode)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Adapts model configurations based on `LLM_PROVIDER` setting
+- Environment variables from `.env`:
+  - `OPENROUTER_API_KEY`: Required for openrouter/mixed modes
+  - `OLLAMA_BASE_URL`: Required for ollama/mixed modes (default: http://localhost:11434)
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
-**`openrouter.py`**
-- `query_model()`: Single async model query
+**Model Specification Formats:**
+- **OpenRouter mode**: `"openai/gpt-4o"`, `"google/gemini-2.5-flash-lite"`
+- **Ollama mode**: `"llama3.1:8b"`, `"mistral:latest"`
+- **Mixed mode**: `"openrouter:openai/gpt-4o"`, `"ollama:llama3.1:8b"`
+
+**`providers/` directory** - Provider Abstraction Layer
+
+**`providers/base.py`**
+- `LLMProvider` abstract base class defining provider interface
+- All providers must implement: `query_model()` and `query_models_parallel()`
+- Ensures consistent API across different provider implementations
+
+**`providers/openrouter.py`**
+- `OpenRouterProvider`: Implementation for OpenRouter API
+- Handles OpenRouter-specific API format and authentication
+- Supports both standard and reasoning models (o1, etc.)
+- `query_model()`: Single async model query to OpenRouter
 - `query_models_parallel()`: Parallel queries using `asyncio.gather()`
 - Returns dict with 'content' and optional 'reasoning_details'
 - Graceful degradation: returns None on failure, continues with successful responses
+
+**`providers/ollama.py`**
+- `OllamaProvider`: Implementation for local Ollama server
+- Communicates with Ollama HTTP API (default: localhost:11434)
+- Supports streaming and non-streaming responses
+- `query_model()`: Single async model query to Ollama
+- `query_models_parallel()`: Parallel queries to local Ollama server
+- Same return format as OpenRouter for consistency
+- Error handling for common issues (server not running, model not found)
+
+**`providers/__init__.py`** - Factory and Routing Logic
+- `get_provider(provider_name)`: Factory function with singleton pattern
+- `parse_model_spec(model_spec)`: Parses model specifications into (provider, model_id)
+- `query_model(model_spec, messages)`: Routes single query to appropriate provider
+- `query_models_parallel(model_specs, messages)`: Intelligent parallel routing
+- Supports both simple mode (global provider) and mixed mode (per-model provider)
+- Groups queries by provider for efficient batch execution
+- All queries execute concurrently (both within and across providers)
 
 **`council.py`** - The Core Logic
 - `stage1_collect_responses()`: Parallel queries to all council models
@@ -109,10 +160,223 @@ This strict format allows reliable parsing while still getting thoughtful evalua
 - Users can verify system's interpretation of model outputs
 - This builds trust and allows debugging of edge cases
 
+## Provider Abstraction Pattern
+
+### Architecture Pattern: Abstract Factory
+
+The multi-provider system uses the **Abstract Factory** and **Strategy** patterns:
+
+```
+LLMProvider (Abstract Base Class)
+    ↓
+    ├── OpenRouterProvider (Concrete Implementation)
+    ├── OllamaProvider (Concrete Implementation)
+    └── Future providers... (Extensible)
+
+Factory Function: get_provider(name) → LLMProvider instance
+Routing Layer: parse_model_spec() + query_model() + query_models_parallel()
+```
+
+**Benefits:**
+- **Encapsulation**: Provider-specific logic isolated in dedicated classes
+- **Extensibility**: Add new providers by implementing `LLMProvider` interface
+- **Consistency**: All providers return same response format
+- **Testability**: Mock providers easily for testing
+- **Performance**: Singleton pattern for provider instances
+
+### Model Specification Parsing
+
+The system intelligently routes models to providers:
+
+1. **Simple Mode** (openrouter or ollama):
+   - `"llama3.1:8b"` → Uses `LLM_PROVIDER` from config
+   - No prefix needed, provider determined globally
+
+2. **Mixed Mode**:
+   - `"ollama:llama3.1:8b"` → Explicitly routes to Ollama
+   - `"openrouter:openai/gpt-4"` → Explicitly routes to OpenRouter
+   - All models MUST have prefix in mixed mode
+
+3. **Parsing Logic**:
+   ```python
+   # Check for explicit prefix
+   if model_spec.startswith("ollama:"):
+       return ("ollama", model_spec[7:])
+   elif model_spec.startswith("openrouter:"):
+       return ("openrouter", model_spec[11:])
+
+   # Fall back to global provider (if not mixed mode)
+   return (LLM_PROVIDER, model_spec)
+   ```
+
+### Parallel Execution Strategy
+
+The routing layer optimizes parallel execution:
+
+1. **Input**: List of model specs (potentially mixed providers)
+2. **Grouping**: Group models by provider for batch execution
+3. **Parallel Provider Queries**: Each provider batch runs concurrently
+4. **Result Aggregation**: Map provider results back to original model specs
+5. **Output**: Dictionary of all results (including failures as None)
+
+**Example Flow:**
+```python
+# Input
+model_specs = [
+    "ollama:llama3.1:8b",
+    "ollama:mistral:latest",
+    "openrouter:openai/gpt-4",
+    "openrouter:anthropic/claude-3.5-sonnet"
+]
+
+# Grouping
+{
+    "ollama": ["llama3.1:8b", "mistral:latest"],
+    "openrouter": ["openai/gpt-4", "anthropic/claude-3.5-sonnet"]
+}
+
+# Execution (concurrent)
+await asyncio.gather(
+    ollama_provider.query_models_parallel([...]),  # 2 models
+    openrouter_provider.query_models_parallel([...])  # 2 models
+)
+
+# Result mapping back to original specs
+```
+
+### Error Handling Philosophy
+
+**Graceful Degradation at Every Layer:**
+
+1. **Provider Level**:
+   - Individual model failures return None
+   - Don't propagate exceptions to council logic
+   - Log errors but continue with successful responses
+
+2. **Routing Level**:
+   - Invalid model specs → None result
+   - Provider instantiation failures → None for affected models
+   - Parse errors → None result
+
+3. **Council Level**:
+   - Continue with successful responses from Stage 1
+   - Adapt Stage 2 ranking to available responses
+   - Stage 3 synthesis uses whatever data is available
+
+**Rationale**: Better to get partial results than complete failure. The council system is designed to aggregate multiple perspectives, so it's robust to individual model failures.
+
+## Migration Guide: Single Provider to Multi-Provider
+
+### For Existing Users (Minimal Changes)
+
+If you're already using OpenRouter, **no changes required**. The system defaults to `openrouter` mode for backward compatibility.
+
+**Optional**: Add `LLM_PROVIDER=openrouter` to `.env` for explicitness.
+
+### Migrating to Ollama (Local)
+
+1. Install Ollama (see README.md)
+2. Pull models:
+   ```bash
+   ollama pull llama3.1:8b
+   ollama pull mistral:latest
+   ollama pull qwen2.5:3b
+   ```
+3. Update `.env`:
+   ```bash
+   LLM_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://localhost:11434
+   ```
+4. Update `backend/config.py`:
+   ```python
+   COUNCIL_MODELS = [
+       "llama3.1:8b",
+       "mistral:latest",
+       "qwen2.5:3b",
+   ]
+   CHAIRMAN_MODEL = "llama3.1:8b"
+   ```
+5. Restart backend
+
+### Migrating to Mixed Mode (Hybrid)
+
+1. Set up both OpenRouter and Ollama
+2. Update `.env`:
+   ```bash
+   LLM_PROVIDER=mixed
+   OPENROUTER_API_KEY=sk-or-v1-...
+   OLLAMA_BASE_URL=http://localhost:11434
+   ```
+3. Update `backend/config.py` with prefixes:
+   ```python
+   COUNCIL_MODELS = [
+       "ollama:llama3.1:8b",              # Local, free
+       "ollama:mistral:latest",           # Local, free
+       "openrouter:google/gemini-2.5-flash-lite",  # Cloud, paid
+       "openrouter:anthropic/claude-3.5-haiku",  # Cloud, paid
+   ]
+   CHAIRMAN_MODEL = "openrouter:google/gemini-2.5-flash-lite"
+   ```
+4. Restart backend
+
+### Adding a New Provider (For Developers)
+
+To add support for a new LLM provider (e.g., HuggingFace, Anthropic Direct, etc.):
+
+1. Create `backend/providers/your_provider.py`:
+   ```python
+   from backend.providers.base import LLMProvider
+
+   class YourProvider(LLMProvider):
+       def __init__(self, api_key: str):
+           self.api_key = api_key
+
+       async def query_model(self, model_id, messages, timeout=120.0):
+           # Implement API call to your provider
+           # Return {"content": str, "reasoning_details": dict or None}
+           # Return None on failure
+           pass
+
+       async def query_models_parallel(self, model_ids, messages):
+           # Implement parallel queries
+           # Return {model_id: result_dict} for all models
+           pass
+   ```
+
+2. Update `backend/providers/__init__.py`:
+   ```python
+   from backend.providers.your_provider import YourProvider
+
+   def get_provider(provider_name: str) -> LLMProvider:
+       if provider_name == "your_provider":
+           return YourProvider(api_key=YOUR_PROVIDER_API_KEY)
+       # ... existing code
+
+   def parse_model_spec(model_spec: str):
+       if model_spec.startswith("your_provider:"):
+           return ("your_provider", model_spec[14:])
+       # ... existing code
+   ```
+
+3. Update `backend/config.py`:
+   ```python
+   VALID_PROVIDERS = ["openrouter", "ollama", "mixed", "your_provider"]
+   YOUR_PROVIDER_API_KEY = os.getenv("YOUR_PROVIDER_API_KEY")
+   ```
+
+4. Test thoroughly with both simple and mixed modes
+
 ## Important Implementation Details
 
 ### Relative Imports
 All backend modules use relative imports (e.g., `from .config import ...`) not absolute imports. This is critical for Python's module system to work correctly when running as `python -m backend.main`.
+
+### Provider Imports in council.py
+The core council logic now imports from `backend.providers` instead of `backend.openrouter`:
+```python
+from backend.providers import query_model, query_models_parallel
+```
+This maintains backward compatibility while routing to the appropriate provider.
 
 ### Port Configuration
 - Backend: 8001 (changed from 8000 to avoid conflict)
