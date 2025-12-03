@@ -57,6 +57,25 @@ COUNCIL_MODELS = [
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
 
+### 4. Custom Self-Hosted Models (Optional)
+
+You can also add custom self-hosted models (e.g., Ollama, vLLM) by configuring `CUSTOM_MODELS` in `backend/config.py`:
+
+```python
+CUSTOM_MODELS = {
+    "ollama/llama3": {
+        "api_url": "http://localhost:11434/v1/chat/completions",
+        "api_key": "ollama"  # Optional, defaults to "custom"
+    }
+}
+
+# Don't forget to add it to the council list!
+COUNCIL_MODELS = [
+    # ... other models
+    "ollama/llama3",
+]
+```
+
 ## Running the Application
 
 **Option 1: Use the start script**
