@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import ProgressBar from './ProgressBar';
 import './ChatInterface.css';
 
 export default function ChatInterface({
@@ -41,7 +42,7 @@ export default function ChatInterface({
     return (
       <div className="chat-interface">
         <div className="empty-state">
-          <h2>Welcome to LLM Council</h2>
+          <h2>Welcome to Council of Sheldons</h2>
           <p>Create a new conversation to get started</p>
         </div>
       </div>
@@ -54,7 +55,7 @@ export default function ChatInterface({
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
             <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <p>Ask a question to consult the Council of Sheldons</p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -70,22 +71,28 @@ export default function ChatInterface({
                 </div>
               ) : (
                 <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
+                  <div className="message-label">Council of Sheldons</div>
 
                   {/* Stage 1 */}
                   {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
+                    <div>
+                      <ProgressBar
+                        completed={msg.progress?.stage1?.completed || 0}
+                        total={msg.progress?.stage1?.total || 0}
+                        stageName="Stage 1: Collecting individual responses"
+                      />
                     </div>
                   )}
                   {msg.stage1 && <Stage1 responses={msg.stage1} />}
 
                   {/* Stage 2 */}
                   {msg.loading?.stage2 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
+                    <div>
+                      <ProgressBar
+                        completed={msg.progress?.stage2?.completed || 0}
+                        total={msg.progress?.stage2?.total || 0}
+                        stageName="Stage 2: Peer rankings"
+                      />
                     </div>
                   )}
                   {msg.stage2 && (
@@ -98,9 +105,12 @@ export default function ChatInterface({
 
                   {/* Stage 3 */}
                   {msg.loading?.stage3 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
+                    <div>
+                      <ProgressBar
+                        completed={msg.progress?.stage3?.completed || 0}
+                        total={msg.progress?.stage3?.total || 1}
+                        stageName="Stage 3: Final synthesis"
+                      />
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}

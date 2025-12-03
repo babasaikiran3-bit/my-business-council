@@ -49,8 +49,12 @@ async def query_model(
             }
 
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
-        return None
+        error_msg = str(e)
+        print(f"Error querying model {model}: {error_msg}")
+        return {
+            'content': None,
+            'error': error_msg
+        }
 
 
 async def query_models_parallel(

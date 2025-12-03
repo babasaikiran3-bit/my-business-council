@@ -32,15 +32,21 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
       </p>
 
       <div className="tabs">
-        {rankings.map((rank, index) => (
-          <button
-            key={index}
-            className={`tab ${activeTab === index ? 'active' : ''}`}
-            onClick={() => setActiveTab(index)}
-          >
-            {rank.model.split('/')[1] || rank.model}
-          </button>
-        ))}
+        {rankings.map((rank, index) => {
+          const modelShortName = rank.model.split('/')[1] || rank.model;
+          const tabLabel = rank.sheldon_name 
+            ? `${rank.sheldon_name} (${modelShortName})`
+            : modelShortName;
+          return (
+            <button
+              key={index}
+              className={`tab ${activeTab === index ? 'active' : ''}`}
+              onClick={() => setActiveTab(index)}
+            >
+              {tabLabel}
+            </button>
+          );
+        })}
       </div>
 
       <div className="tab-content">

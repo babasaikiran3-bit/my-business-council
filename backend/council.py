@@ -1,32 +1,98 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
+import asyncio
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, COUNCIL_CONTEXT, COUNCIL_SHELDON_NAMES, SHELDON_CONTEXT
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+def get_sheldon_context_for_model(model_index: int) -> Tuple[Optional[str], str]:
+    """
+    Get Sheldon name and context for a model by index.
+    
+    Args:
+        model_index: Index of the model in COUNCIL_MODELS
+        
+    Returns:
+        Tuple of (sheldon_name, context_string)
+    """
+    if model_index >= len(COUNCIL_SHELDON_NAMES):
+        return None, ""
+    
+    sheldon_name = COUNCIL_SHELDON_NAMES[model_index]
+    context = COUNCIL_CONTEXT.get(sheldon_name, "")
+    
+    return sheldon_name, context
+
+
+async def stage1_collect_responses(user_query: str, progress_callback=None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        progress_callback: Optional callback function(completed, total) called as agents respond
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    # Validate configuration: ensure we have matching counts
+    if len(COUNCIL_MODELS) != len(COUNCIL_SHELDON_NAMES):
+        raise ValueError(
+            f"Mismatch: {len(COUNCIL_MODELS)} models but {len(COUNCIL_SHELDON_NAMES)} Sheldon names. "
+            "Each model must have a corresponding Sheldon personality."
+        )
+    
+    total_agents = len(COUNCIL_MODELS)
+    completed_count = 0
+    
+    # Build messages with Sheldon context for each model
+    async def query_with_context(model: str, model_index: int) -> Tuple[str, Optional[Dict[str, Any]], Optional[str]]:
+        """Query a single model with its corresponding Sheldon context."""
+        nonlocal completed_count
+        sheldon_name, context = get_sheldon_context_for_model(model_index)
+        
+        # Build messages with context as system message, then user query
+        messages = []
+        if context:
+            messages.append({
+                "role": "system",
+                "content": f"You are {sheldon_name}: {context}\n\nAnswer the following question in character, embodying this Sheldon personality."
+            })
+        messages.append({"role": "user", "content": user_query})
+        
+        response = await query_model(model, messages)
+        completed_count += 1
+        if progress_callback:
+            progress_callback(completed_count, total_agents)
+        return model, response, sheldon_name
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Query all models in parallel with their individual contexts
+    # This ensures all 5 Sheldons are queried: Science, Texas, Fanboy, Germaphobe, Humorous
+    tasks = [
+        query_with_context(model, idx)
+        for idx, model in enumerate(COUNCIL_MODELS)
+    ]
+    responses_list = await asyncio.gather(*tasks)
 
-    # Format results
+    # Format results with Sheldon names, preserving order
+    # Include all models, even if they failed (so all 5 tabs show in frontend)
     stage1_results = []
-    for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+    for model, response, sheldon_name in responses_list:
+        if response is not None and response.get('error') is None:
+            # Successful response
             stage1_results.append({
                 "model": model,
+                "sheldon_name": sheldon_name,
                 "response": response.get('content', '')
+            })
+        else:
+            # Failed response - include with error message so tab still shows
+            error_msg = response.get('error', 'Unknown error') if response else 'No response received'
+            stage1_results.append({
+                "model": model,
+                "sheldon_name": sheldon_name,
+                "response": f"*Error: {error_msg}*"
             })
 
     return stage1_results
@@ -34,7 +100,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    progress_callback=None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -55,22 +122,40 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     }
 
-    # Build the ranking prompt
-    responses_text = "\n\n".join([
-        f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
-    ])
+    # Build the ranking prompt with Sheldon context for each response
+    responses_text_parts = []
+    for label, result in zip(labels, stage1_results):
+        sheldon_name = result.get('sheldon_name', 'Unknown')
+        response_content = result['response']
+        responses_text_parts.append(
+            f"Response {label} (from {sheldon_name}):\n{response_content}"
+        )
+    responses_text = "\n\n".join(responses_text_parts)
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+    total_agents = len(COUNCIL_MODELS)
+    completed_count = 0
+    
+    # Build ranking prompts with Sheldon context for each model
+    async def query_ranking_with_context(model: str, model_index: int) -> Tuple[str, Optional[Dict[str, Any]], Optional[str]]:
+        """Query a model for ranking with its corresponding Sheldon context."""
+        nonlocal completed_count
+        sheldon_name, context = get_sheldon_context_for_model(model_index)
+        
+        ranking_prompt = f"""
+You are {sheldon_name} from Sheldon Cooper's Council of Sheldons.
+
+{context}
+
+You are evaluating different responses to the following question:
 
 Question: {user_query}
 
-Here are the responses from different models (anonymized):
+Here are the responses from different models (each labeled with their Sheldon personality):
 
 {responses_text}
 
 Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
+1. First, evaluate each response individually from your {sheldon_name} perspective.
 2. Then, at the very end of your response, provide a final ranking.
 
 IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
@@ -90,23 +175,45 @@ FINAL RANKING:
 2. Response A
 3. Response B
 
-Now provide your evaluation and ranking:"""
+Now provide your evaluation and ranking from your {sheldon_name} perspective:
 
-    messages = [{"role": "user", "content": ranking_prompt}]
+"""
+        messages = [{"role": "user", "content": ranking_prompt}]
+        response = await query_model(model, messages)
+        completed_count += 1
+        if progress_callback:
+            progress_callback(completed_count, total_agents)
+        return model, response, sheldon_name
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Query all models for rankings in parallel with their individual contexts
+    ranking_tasks = [
+        query_ranking_with_context(model, idx)
+        for idx, model in enumerate(COUNCIL_MODELS)
+    ]
+    ranking_responses = await asyncio.gather(*ranking_tasks)
 
-    # Format results
+    # Format results with Sheldon names, including all models even if they failed
     stage2_results = []
-    for model, response in responses.items():
-        if response is not None:
+    for model, response, sheldon_name in ranking_responses:
+        
+        if response is not None and response.get('error') is None:
+            # Successful response
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
                 "model": model,
+                "sheldon_name": sheldon_name,
                 "ranking": full_text,
                 "parsed_ranking": parsed
+            })
+        else:
+            # Failed response - include with error message so tab still shows
+            error_msg = response.get('error', 'Unknown error') if response else 'No response received'
+            stage2_results.append({
+                "model": model,
+                "sheldon_name": sheldon_name,
+                "ranking": f"*Error: {error_msg}*",
+                "parsed_ranking": []
             })
 
     return stage2_results, label_to_model
@@ -139,33 +246,59 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    chairman_prompt = f"""
+You are Chairman Sheldon Cooper, presiding over the Council of Sheldons—a synthesis of your various intellectual facets working in concert to provide the most comprehensive answer possible.
 
-Original Question: {user_query}
+{SHELDON_CONTEXT}
 
-STAGE 1 - Individual Responses:
+**User's Question:** {user_query}
+
+**Stage 1 - Individual Council Member Responses:**
 {stage1_text}
 
-STAGE 2 - Peer Rankings:
+**Stage 2 - Peer Evaluations and Rankings:**
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
+**Your Task as Chairman:**
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+Synthesize the above information into a coherent, comprehensive final answer. Your response should:
+
+1. **Begin formally** with a brief acknowledgment (e.g., "Order in the council" or "Per Robert's Rules, Article VII, Section 3") to establish protocol.
+
+2. **Integrate the best insights** from the individual responses, prioritizing information from responses that received higher rankings in Stage 2. Consider:
+   - What factual information is most accurate and relevant?
+   - What perspectives offer unique value?
+   - What points are supported by multiple council members?
+
+3. **Synthesize, don't just summarize.** Weave together the insights into a unified answer that addresses the user's question comprehensively. Avoid simply listing what each Sheldon said—instead, create a coherent narrative that draws on the collective wisdom.
+
+4. **Embody Sheldon's full personality**—a blend of intellectual rigor and characteristic humor:
+   - Use formal, precise language with scientific/logical frameworks
+   - Include protocol references ("Per Robert's Rules") and methodical structure
+   - Naturally incorporate humor: witty observations, clever puns, self-aware jokes, geeky references (Star Trek, Star Wars, etc.)
+   - Use "Bazinga!" when appropriate for particularly clever points
+   - Reference canon elements naturally (North Pole, Spot, Soft Kitty, routines, etc.) when they enhance the point
+   - Allow for playful banter and Sheldon's characteristic blend of arrogance and vulnerability
+   - Balance intellectual depth with entertainment—be both informative AND engaging
+
+5. **Conclude decisively** with a clear verdict or answer to the user's question, perhaps with a brief note of empathy or encouragement if appropriate, delivered in Sheldon's unique voice.
+
+**Format:** Write your response as a first-person monologue delivered directly to the user, as if you're speaking to them in person. Aim for 200-400 words—comprehensive but not rambling. The tone should be intellectually rigorous yet entertaining, with Sheldon's characteristic wit and humor woven naturally throughout. Be helpful, accurate, and insightful while also being engaging and authentically Sheldon.
+
+**Begin your synthesis:**
+"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
     response = await query_model(CHAIRMAN_MODEL, messages)
 
-    if response is None:
+    if response is None or response.get('error'):
         # Fallback if chairman fails
+        error_msg = response.get('error', 'Unknown error') if response else 'No response received'
         return {
             "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
+            "response": f"*Error: {error_msg}*"
         }
 
     return {
@@ -274,10 +407,10 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use nvidia/nemotron-nano-12b-v2-vl for title generation (fast and cheap)
+    response = await query_model("nvidia/nemotron-nano-12b-v2-vl:free", messages, timeout=30.0)
 
-    if response is None:
+    if response is None or response.get('error') or not response.get('content'):
         # Fallback to a generic title
         return "New Conversation"
 

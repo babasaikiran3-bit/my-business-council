@@ -8,9 +8,25 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import logging
+import os
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+
+# Configure logging - check for DEBUG environment variable
+debug_mode = os.getenv("DEBUG", "false").lower() == "true"
+log_level = logging.DEBUG if debug_mode else logging.INFO
+
+logging.basicConfig(
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+if debug_mode:
+    logger.info("🔍 Debug mode enabled")
 
 app = FastAPI(title="LLM Council API")
 
@@ -85,26 +101,34 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
+    logger.debug(f"Received message in conversation {conversation_id}: {request.content[:100]}...")
+    
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
+        logger.warning(f"Conversation {conversation_id} not found")
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
+    logger.debug(f"First message: {is_first_message}")
 
     # Add user message
     storage.add_user_message(conversation_id, request.content)
 
     # If this is the first message, generate a title
     if is_first_message:
+        logger.debug("Generating conversation title...")
         title = await generate_conversation_title(request.content)
+        logger.debug(f"Generated title: {title}")
         storage.update_conversation_title(conversation_id, title)
 
     # Run the 3-stage council process
+    logger.info("Starting 3-stage council process...")
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
         request.content
     )
+    logger.info("Council process completed")
 
     # Add assistant message with all stages
     storage.add_assistant_message(
@@ -123,15 +147,35 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     }
 
 
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a specific conversation."""
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    storage.delete_conversation(conversation_id)
+    return {"status": "deleted"}
+
+
+@app.delete("/api/conversations")
+async def delete_all_conversations():
+    """Delete all conversations."""
+    storage.delete_all_conversations()
+    return {"status": "deleted", "count": "all"}
+
+
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
+    logger.debug(f"Streaming message in conversation {conversation_id}")
+    
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
+        logger.warning(f"Conversation {conversation_id} not found")
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Check if this is the first message
@@ -145,27 +189,68 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
+                logger.debug("Starting title generation task")
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses
+            logger.debug("Stage 1: Starting response collection")
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            
+            # Create a queue to collect progress events
+            stage1_progress_queue = asyncio.Queue()
+            
+            def stage1_progress_callback(completed, total):
+                # Schedule the put operation - we're in async context so this works
+                asyncio.create_task(stage1_progress_queue.put(('stage1_progress', completed, total)))
+            
+            # Stream progress events while collecting responses
+            stage1_task = asyncio.create_task(stage1_collect_responses(request.content, stage1_progress_callback))
+            while not stage1_task.done():
+                try:
+                    event_type, completed, total = await asyncio.wait_for(stage1_progress_queue.get(), timeout=0.1)
+                    yield f"data: {json.dumps({'type': event_type, 'completed': completed, 'total': total})}\n\n"
+                except asyncio.TimeoutError:
+                    await asyncio.sleep(0.05)
+            
+            stage1_results = await stage1_task
+            logger.debug(f"Stage 1: Collected {len(stage1_results)} responses")
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
+            logger.debug("Stage 2: Starting ranking collection")
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            
+            stage2_progress_queue = asyncio.Queue()
+            
+            def stage2_progress_callback(completed, total):
+                # Schedule the put operation - we're in async context so this works
+                asyncio.create_task(stage2_progress_queue.put(('stage2_progress', completed, total)))
+            
+            stage2_task = asyncio.create_task(stage2_collect_rankings(request.content, stage1_results, stage2_progress_callback))
+            while not stage2_task.done():
+                try:
+                    event_type, completed, total = await asyncio.wait_for(stage2_progress_queue.get(), timeout=0.1)
+                    yield f"data: {json.dumps({'type': event_type, 'completed': completed, 'total': total})}\n\n"
+                except asyncio.TimeoutError:
+                    await asyncio.sleep(0.05)
+            
+            stage2_results, label_to_model = await stage2_task
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+            logger.debug(f"Stage 2: Collected {len(stage2_results)} rankings")
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
+            logger.debug("Stage 3: Starting final synthesis")
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            logger.debug("Stage 3: Synthesis complete")
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:
+                logger.debug("Waiting for title generation")
                 title = await title_task
+                logger.debug(f"Title generated: {title}")
                 storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
@@ -178,9 +263,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             )
 
             # Send completion event
+            logger.debug("Streaming complete")
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
         except Exception as e:
+            logger.error(f"Error in stream: {e}", exc_info=True)
             # Send error event
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -196,4 +283,25 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    
+    # Check for debug mode via environment variable
+    debug_mode = os.getenv("DEBUG", "false").lower() == "true"
+    
+    # When using reload, must pass app as import string
+    if debug_mode:
+        uvicorn.run(
+            "backend.main:app",  # Import string required for reload
+            host="0.0.0.0", 
+            port=8001,
+            reload=True,  # Auto-reload on code changes in debug mode
+            log_level="debug",  # Verbose logging in debug mode
+            access_log=True  # Show HTTP request logs
+        )
+    else:
+        uvicorn.run(
+            app,  # Can use app object directly when reload is False
+            host="0.0.0.0", 
+            port=8001,
+            log_level="info",
+            access_log=True
+        )

@@ -1,5 +1,5 @@
 /**
- * API client for the LLM Council backend.
+ * API client for the Council of Sheldons backend.
  */
 
 const API_BASE = 'http://localhost:8001';
@@ -62,6 +62,35 @@ export const api = {
     );
     if (!response.ok) {
       throw new Error('Failed to send message');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a specific conversation.
+   */
+  async deleteConversation(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to delete conversation');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete all conversations.
+   */
+  async deleteAllConversations() {
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete all conversations');
     }
     return response.json();
   },
