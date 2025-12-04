@@ -1,0 +1,278 @@
+/**
+ * Minimalist Onboarding Page
+ * Inspired by Grok's dark, centered, minimal design
+ *
+ * Design specs:
+ * - Dark background: #0D0D0D
+ * - Text primary: #FFFFFF
+ * - Text secondary: #8B8B8B
+ * - Border/accent: #2A2A2A
+ * - Input bg: #1A1A1A
+ * - 8px grid system
+ * - Inter font family
+ */
+
+/* Layout */
+.onboarding-container {
+  min-height: 100vh;
+  background-color: #791f85;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Header */
+.onboarding-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  z-index: 10;
+}
+
+.onboarding-logo-small {
+  width: 32px;
+  height: 32px;
+}
+
+.onboarding-header-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.onboarding-sign-in-btn {
+  background-color: transparent;
+  color: #F5841F;
+  border: 1px solid #F5841F;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.onboarding-sign-in-btn:hover {
+  background-color: #F5841F;
+  color: #FFFFFF;
+}
+
+.onboarding-sign-up-btn {
+  background-color: #F5841F;
+  color: #FFFFFF;
+  border: 1px solid #F5841F;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: opacity 0.2s ease;
+}
+
+.onboarding-sign-up-btn:hover {
+  opacity: 0.85;
+}
+
+/* Main content */
+.onboarding-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  width: 100%;
+  max-width: 600px;
+  position: relative;
+  z-index: 10;
+}
+
+/* Logo */
+.onboarding-logo-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.onboarding-logo-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.onboarding-logo-text {
+  font-size: 48px;
+  font-weight: 400;
+  color: #F5841F;
+  letter-spacing: -0.02em;
+}
+
+/* Input area */
+.onboarding-input-container {
+  width: 100%;
+  position: relative;
+}
+
+.onboarding-input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid #F5841F;
+  border-radius: 48px;
+  padding: 4px 8px 4px 20px;
+  transition: border-color 0.2s ease;
+}
+
+.onboarding-input-wrapper.focused {
+  border-color: #F5841F;
+  box-shadow: 0 0 0 2px rgba(245, 132, 31, 0.2);
+}
+
+.onboarding-input {
+  flex: 1;
+  background-color: transparent;
+  border: none;
+  color: #FFFFFF;
+  font-size: 16px;
+  padding: 12px 0;
+  outline: none;
+}
+
+.onboarding-input::placeholder {
+  color: #8B8B8B;
+}
+
+.onboarding-input-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onboarding-model-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: transparent;
+  border: 1px solid #F5841F;
+  border-radius: 24px;
+  padding: 8px 12px;
+  color: #F5841F;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.onboarding-model-selector:hover {
+  background-color: #F5841F;
+  color: #FFFFFF;
+}
+
+.onboarding-sparkle-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.onboarding-submit-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #F5841F;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.onboarding-submit-btn:hover {
+  background-color: #FF9A3C;
+  transform: scale(1.05);
+}
+
+/* Tagline */
+.onboarding-tagline {
+  font-size: 18px;
+  color: #F5841F;
+  text-align: center;
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.5;
+  max-width: 500px;
+}
+
+/* Auth buttons */
+.onboarding-auth-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.onboarding-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: transparent;
+  border: 1px solid #F5841F;
+  border-radius: 24px;
+  padding: 10px 16px;
+  color: #F5841F;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.onboarding-pill:hover {
+  background-color: #F5841F;
+  color: #FFFFFF;
+}
+
+.onboarding-pill-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+}
+
+/* Footer */
+.onboarding-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 24px;
+  z-index: 10;
+}
+
+.onboarding-footer-text {
+  font-size: 12px;
+  color: #666666;
+}
+
+.onboarding-footer-link {
+  color: #F5841F;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.onboarding-footer-link:hover {
+  color: #FF9A3C;
+  text-decoration: underline;
+}
+
+/* Star field canvas */
+.onboarding-star-field {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}

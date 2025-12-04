@@ -1,0 +1,186 @@
+/* Account Creation Styling */
+.account-creation {
+  min-height: 100vh;
+  background-color: #791f85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.account-creation-container {
+  width: 100%;
+  max-width: 480px;
+}
+
+.account-creation-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.account-creation-header h2 {
+  font-size: 28px;
+  font-weight: 500;
+  color: #FFFFFF;
+  margin: 0 0 12px 0;
+}
+
+.account-creation-subheading {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Clerk Form Wrapper */
+.clerk-form-wrapper {
+  background-color: #FFFFFF;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+
+/* Custom Clerk Styling */
+.clerk-root-box {
+  width: 100%;
+}
+
+.clerk-card {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.clerk-header-title {
+  display: none; /* Hide Clerk's default title, we have our own */
+}
+
+.clerk-header-subtitle {
+  display: none; /* Hide Clerk's default subtitle */
+}
+
+.clerk-social-button {
+  background-color: #FFFFFF;
+  border: 1px solid #E0E0E0;
+  color: #333333;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.clerk-social-button:hover {
+  border-color: #F5841F;
+  background-color: rgba(245, 132, 31, 0.05);
+}
+
+.clerk-primary-button {
+  background-color: #F5841F !important;
+  color: #FFFFFF !important;
+  border: none !important;
+  padding: 12px !important;
+  border-radius: 8px !important;
+  font-size: 16px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.clerk-primary-button:hover {
+  background-color: #FF9A3C !important;
+}
+
+.clerk-input {
+  border: 1px solid #E0E0E0 !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  font-size: 14px !important;
+  transition: border-color 0.2s ease !important;
+}
+
+.clerk-input:focus {
+  border-color: #F5841F !important;
+  box-shadow: 0 0 0 2px rgba(245, 132, 31, 0.1) !important;
+}
+
+.clerk-link {
+  color: #F5841F !important;
+  text-decoration: none !important;
+  transition: color 0.2s ease !important;
+}
+
+.clerk-link:hover {
+  color: #FF9A3C !important;
+  text-decoration: underline !important;
+}
+
+/* Supabase Form Styling */
+.supabase-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-field label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333333;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #666666;
+  margin: 4px 0 0 0;
+}
+
+/* Auth messages */
+.auth-message {
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.auth-message.error {
+  background-color: #FEE;
+  border: 1px solid #FCC;
+  color: #C33;
+}
+
+.auth-message.success {
+  background-color: #EFE;
+  border: 1px solid #CFC;
+  color: #3A3;
+}
+
+.auth-toggle {
+  text-align: center;
+  padding-top: 8px;
+  font-size: 14px;
+  color: #666666;
+}
+
+.auth-toggle p {
+  margin: 0;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .account-creation-header h2 {
+    font-size: 24px;
+  }
+
+  .account-creation-subheading {
+    font-size: 14px;
+  }
+
+  .clerk-form-wrapper {
+    padding: 24px;
+  }
+}
