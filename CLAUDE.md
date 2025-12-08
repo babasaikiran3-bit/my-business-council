@@ -8,31 +8,95 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 ## Architecture
 
+### Provider Abstraction System (NEW!)
+
+**Multi-Provider Support**
+LLM Council now supports three providers out of the box:
+- **OpenRouter**: Cloud models (GPT-4, Claude, Gemini, etc.)
+- **Ollama**: Local models (Llama2, Mistral, CodeLlama, etc.)
+- **LMStudio**: Local models via OpenAI-compatible API
+
+**Model Identifier Format**
+Models use a flexible identifier format:
+- **Prefixed**: `provider:model` (e.g., `ollama:llama2`, `openrouter:gpt-4`)
+- **Simple**: `model` (uses `DEFAULT_PROVIDER` from config)
+
+This enables:
+- **Cloud-only**: All models via OpenRouter (requires API key, pay-per-use)
+- **Local-only**: All models via Ollama/LMStudio (100% private, free)
+- **Mixed mode**: Combine providers (e.g., local council + cloud chairman)
+
+**Provider Architecture (`backend/providers/`)**
+
+`base.py` - Abstract base class
+- Defines `Provider` interface with `query()` and `query_batch()` methods
+- All providers inherit from this base class
+- Enforces consistent API across providers
+
+`openrouter.py` - OpenRouterProvider
+- Cloud provider using OpenRouter API
+- Requires API key from environment
+- Supports all OpenRouter models (GPT, Claude, Gemini, etc.)
+
+`ollama.py` - OllamaProvider
+- Local provider using Ollama's native API
+- Uses ollama library's `AsyncClient.chat()` method
+- Default URL: http://localhost:11434
+
+`lmstudio.py` - LMStudioProvider
+- Local provider using OpenAI-compatible API
+- No authentication required
+- Default URL: http://localhost:1234/v1/chat/completions
+
+`factory.py` - ProviderFactory
+- Central routing system for model requests
+- Parses model identifiers and routes to appropriate provider
+- Handles parallel queries across multiple providers
+- Caches provider instances for efficiency
+- Validates provider configuration on initialization
+
+**How It Works**
+1. `council.py` creates ProviderFactory singleton with config
+2. Model identifiers like `["ollama:llama2", "openrouter:gpt-4"]` are passed to factory
+3. Factory parses each identifier: `("ollama", "llama2")`, `("openrouter", "gpt-4")`
+4. Factory routes to appropriate provider and executes query
+5. Results returned with original model identifier as key
+
+**Configuration**
+See `.env.example` for complete setup instructions. Key variables:
+- `DEFAULT_PROVIDER`: Provider for unprefixed model names
+- `OPENROUTER_API_KEY`: Required for OpenRouter models
+- `OLLAMA_BASE_URL`: Ollama server URL (default: localhost:11434)
+- `LMSTUDIO_BASE_URL`: LMStudio server URL (default: localhost:1234)
+
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `COUNCIL_MODELS` (list of model identifiers, any provider)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Contains `CONVERSATION_TITLE_MODEL` (fast model for title generation)
+- Contains provider configuration (URLs, API keys via environment)
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
-
-**`openrouter.py`**
-- `query_model()`: Single async model query
-- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
-- Returns dict with 'content' and optional 'reasoning_details'
-- Graceful degradation: returns None on failure, continues with successful responses
+- **Model identifier examples**:
+  - Cloud: `"openai/gpt-4"`, `"anthropic/claude-sonnet-4"`
+  - Local: `"ollama:llama2"`, `"lmstudio:mistral"`
+  - Mixed: `["ollama:llama2", "openrouter:gpt-4"]`
 
 **`council.py`** - The Core Logic
-- `stage1_collect_responses()`: Parallel queries to all council models
+- `get_factory()`: Creates/returns ProviderFactory singleton with config
+- `stage1_collect_responses()`: Parallel queries to all council models via factory
 - `stage2_collect_rankings()`:
   - Anonymizes responses as "Response A, B, C, etc."
   - Creates `label_to_model` mapping for de-anonymization
   - Prompts models to evaluate and rank (with strict format requirements)
   - Returns tuple: (rankings_list, label_to_model_dict)
   - Each ranking includes both raw text and `parsed_ranking` list
+  - Uses same council models via factory (supports mixed providers)
 - `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
 - `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+- `generate_conversation_title()`: Fast title generation for conversations
+- All model queries go through ProviderFactory for automatic routing
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
@@ -143,24 +207,73 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 
 ## Testing Notes
 
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+**Provider Testing**
+Before configuring models in production:
+
+1. **OpenRouter**: Verify API key and model availability
+   - Check models at https://openrouter.ai/models
+   - Test with simple query first
+
+2. **Ollama**: Ensure server is running and models are pulled
+   ```bash
+   ollama serve  # Start server
+   ollama pull llama2  # Download model
+   ollama list  # Verify installed models
+   curl http://localhost:11434/api/tags  # Check API
+   ```
+
+3. **LMStudio**: Start local server and load model
+   - Open LMStudio → Developer → Start Server
+   - Verify server at http://localhost:1234
+
+**Factory Validation**
+The ProviderFactory has built-in validation:
+```python
+from backend.providers import ProviderFactory
+factory = ProviderFactory(...)
+print(factory.validate_all())  # Check all providers
+print(factory.get_available_providers())  # List working providers
+```
+
+**Testing Mixed Mode**
+Set up a test configuration with mixed providers:
+```python
+COUNCIL_MODELS = [
+    "ollama:llama2",  # Local
+    "openrouter:gpt-4o",  # Cloud
+]
+```
+Verify all providers respond correctly before production use.
 
 ## Data Flow Summary
 
 ```
 User Query
     ↓
-Stage 1: Parallel queries → [individual responses]
+ProviderFactory initialization (singleton)
+    ├─ OpenRouterProvider (if configured)
+    ├─ OllamaProvider (if configured)
+    └─ LMStudioProvider (if configured)
     ↓
-Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankings]
+Stage 1: Parse model identifiers → Route to providers → Parallel queries
+    → [individual responses with original model IDs]
+    ↓
+Stage 2: Anonymize → Route to providers → Parallel ranking queries
+    → [evaluations + parsed rankings]
     ↓
 Aggregate Rankings Calculation → [sorted by avg position]
     ↓
-Stage 3: Chairman synthesis with full context
+Stage 3: Route chairman model to provider → Synthesis with full context
+    → [final answer]
     ↓
 Return: {stage1, stage2, stage3, metadata}
     ↓
 Frontend: Display with tabs + validation UI
 ```
 
-The entire flow is async/parallel where possible to minimize latency.
+**Key Points:**
+- All model queries go through ProviderFactory
+- Factory automatically routes based on model identifier prefix
+- Parallel execution happens both within and across providers
+- Each stage can use models from different providers (mixed mode)
+- The entire flow is async/parallel where possible to minimize latency
