@@ -1,8 +1,32 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .providers import ProviderFactory
+from .config import (
+    COUNCIL_MODELS,
+    CHAIRMAN_MODEL,
+    CONVERSATION_TITLE_MODEL,
+    DEFAULT_PROVIDER,
+    OPENROUTER_API_KEY,
+    OLLAMA_BASE_URL,
+    LMSTUDIO_BASE_URL
+)
+
+# Initialize the provider factory as a module-level singleton
+_factory = None
+
+
+def get_factory() -> ProviderFactory:
+    """Get or create the provider factory singleton."""
+    global _factory
+    if _factory is None:
+        _factory = ProviderFactory(
+            default_provider=DEFAULT_PROVIDER,
+            openrouter_api_key=OPENROUTER_API_KEY,
+            ollama_base_url=OLLAMA_BASE_URL,
+            lmstudio_base_url=LMSTUDIO_BASE_URL
+        )
+    return _factory
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -16,16 +40,17 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
         List of dicts with 'model' and 'response' keys
     """
     messages = [{"role": "user", "content": user_query}]
+    factory = get_factory()
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Query all models in parallel (can be mixed providers!)
+    responses = await factory.query_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
     stage1_results = []
-    for model, response in responses.items():
+    for model_id, response in responses.items():
         if response is not None:  # Only include successful responses
             stage1_results.append({
-                "model": model,
+                "model": model_id,
                 "response": response.get('content', '')
             })
 
@@ -93,18 +118,19 @@ FINAL RANKING:
 Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
+    factory = get_factory()
 
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await factory.query_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
     stage2_results = []
-    for model, response in responses.items():
+    for model_id, response in responses.items():
         if response is not None:
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
-                "model": model,
+                "model": model_id,
                 "ranking": full_text,
                 "parsed_ranking": parsed
             })
@@ -157,9 +183,10 @@ Your task as Chairman is to synthesize all of this information into a single, co
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
+    factory = get_factory()
 
     # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    response = await factory.query_model(CHAIRMAN_MODEL, messages)
 
     if response is None:
         # Fallback if chairman fails
@@ -273,9 +300,14 @@ Question: {user_query}
 Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
+    factory = get_factory()
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use conversation model for title generation (fast and cheap)
+    response = await factory.query_model(
+        CONVERSATION_TITLE_MODEL,
+        messages,
+        timeout=30.0
+    )
 
     if response is None:
         # Fallback to a generic title
@@ -310,7 +342,7 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     if not stage1_results:
         return [], [], {
             "model": "error",
-            "response": "All models failed to respond. Please try again."
+            "response": "All models failed to respond. Please check your configuration and provider availability."
         }, {}
 
     # Stage 2: Collect rankings
