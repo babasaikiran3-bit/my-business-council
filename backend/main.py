@@ -62,6 +62,13 @@ async def list_conversations():
     return storage.list_conversations()
 
 
+@app.delete("/api/conversations")
+async def delete_conversations():
+    """Delete all conversations from storage."""
+    storage.delete_all_conversations()
+    return {"status": "ok"}
+
+
 @app.post("/api/conversations", response_model=Conversation)
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
