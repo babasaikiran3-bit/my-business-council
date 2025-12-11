@@ -1,8 +1,8 @@
-"""OpenRouter API client for making LLM requests."""
+"""OpenRouter API client for making LLM requests (plus optional custom endpoints)."""
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL, CUSTOM_MODELS
 
 
 async def query_model(
@@ -11,18 +11,27 @@ async def query_model(
     timeout: float = 120.0
 ) -> Optional[Dict[str, Any]]:
     """
-    Query a single model via OpenRouter API.
+    Query a single model via OpenRouter API or a custom endpoint.
 
     Args:
-        model: OpenRouter model identifier (e.g., "openai/gpt-4o")
+        model: Model identifier (e.g., "openai/gpt-4o" or custom ID)
         messages: List of message dicts with 'role' and 'content'
         timeout: Request timeout in seconds
 
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
+    # Choose endpoint and key
+    if model in CUSTOM_MODELS:
+        cfg = CUSTOM_MODELS[model]
+        api_url = cfg["api_url"]
+        api_key = cfg.get("api_key", "custom")
+    else:
+        api_url = OPENROUTER_API_URL
+        api_key = OPENROUTER_API_KEY
+
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
@@ -34,7 +43,7 @@ async def query_model(
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
-                OPENROUTER_API_URL,
+                api_url,
                 headers=headers,
                 json=payload
             )
@@ -61,7 +70,7 @@ async def query_models_parallel(
     Query multiple models in parallel.
 
     Args:
-        models: List of OpenRouter model identifiers
+        models: List of model identifiers
         messages: List of message dicts to send to each model
 
     Returns:

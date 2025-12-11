@@ -79,6 +79,61 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+## Run with Local Models (Ollama)
+
+You can run the council against local, open‑source models you installed with Ollama (e.g. `nemotron`, `nemotron9b`, `nemotron12b`).
+
+1) Ensure the Ollama daemon is running and models are installed:
+```bash
+ollama list
+```
+
+2) Option A — Switch the backend to local mode (with resource guard). Either set env vars:
+```bash
+export COUNCIL_PROVIDER=local
+export LOCAL_MODELS="nemotron,nemotron9b"   # customize as you like
+# optional:
+# export CHAIRMAN_LOCAL_MODEL=nemotron12b
+# export COUNCIL_MAX_PARALLEL_LOCAL=2       # hard cap concurrent runs
+# export COUNCIL_MEM_RESERVE_GB=6           # keep RAM reserved for OS/apps
+```
+…or edit `backend/config.py` accordingly.
+
+3) Start the backend as usual:
+```bash
+uv run python -m backend.main
+```
+
+### Safeguards to avoid crashes
+- Adaptive memory guard estimates each model’s memory weight (from `ollama /api/tags` or safe defaults) and keeps the total under a computed budget (≈ 60% of RAM or total minus reserve).
+- Optional hard cap: set `COUNCIL_MAX_PARALLEL_LOCAL` to limit parallel local runs.
+- Per-request timeout for local calls (default 180s) prevents hung requests.
+
+This lets you run multiple efficient models in parallel while avoiding overload on machines with limited memory.
+
+## 4. Custom Self‑Hosted Models (Optional)
+
+Alternatively, you can point the council at any OpenAI‑compatible endpoint (e.g., vLLM, Ollama’s OpenAI proxy) without enabling the local resource guard:
+
+In `backend/config.py`:
+
+```python
+CUSTOM_MODELS = {
+    "ollama/llama3": {
+        "api_url": "http://localhost:11434/v1/chat/completions",
+        "api_key": "ollama"  # Optional, defaults to "custom"
+    }
+}
+
+# Don't forget to add it to the council list!
+COUNCIL_MODELS = [
+    # ... other models
+    "ollama/llama3",
+]
+```
+
+With this setup, the backend will route those IDs to the specified endpoints via the same OpenRouter client code path (no adaptive guard). See related discussion and example in the PR for custom models. 
+
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
