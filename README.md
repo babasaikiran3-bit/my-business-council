@@ -32,15 +32,23 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### 2. Configure API Provider
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root. You can use either **OpenRouter** or **Unbound** as your API provider.
 
+**Option A: OpenRouter (default)**
 ```bash
+API_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-v1-...
 ```
-
 Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+
+**Option B: Unbound**
+```bash
+API_PROVIDER=unbound
+UNBOUND_API_KEY=your-unbound-api-key
+```
+Get your API key at [getunbound.ai](https://getunbound.ai/). Unbound provides a secure AI gateway with cost controls and compliance features.
 
 ### 3. Configure Models (Optional)
 
@@ -56,6 +64,8 @@ COUNCIL_MODELS = [
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
+
+Model identifiers are automatically mapped between providers, so you can use the same names regardless of which API provider you choose.
 
 ## Running the Application
 
