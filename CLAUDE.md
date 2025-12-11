@@ -11,16 +11,23 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `API_PROVIDER` setting ("openrouter" or "unbound")
+- Contains `COUNCIL_MODELS` (list of model identifiers)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Uses environment variables `OPENROUTER_API_KEY` or `UNBOUND_API_KEY` from `.env`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
 **`openrouter.py`**
-- `query_model()`: Single async model query
+- `query_model()`: Single async model query via OpenRouter
 - `query_models_parallel()`: Parallel queries using `asyncio.gather()`
 - Returns dict with 'content' and optional 'reasoning_details'
 - Graceful degradation: returns None on failure, continues with successful responses
+
+**`unbound.py`**
+- `query_model()`: Single async model query via Unbound (OpenAI-compatible API)
+- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
+- Same interface as openrouter.py for seamless provider switching
+- Uses `https://api.getunbound.ai/v1/chat/completions` endpoint
 
 **`council.py`** - The Core Logic
 - `stage1_collect_responses()`: Parallel queries to all council models
@@ -118,6 +125,12 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 - Backend: 8001 (changed from 8000 to avoid conflict)
 - Frontend: 5173 (Vite default)
 - Update both `backend/main.py` and `frontend/src/api.js` if changing
+
+### API Provider Configuration
+- Set `API_PROVIDER=openrouter` or `API_PROVIDER=unbound` in `.env`
+- OpenRouter is the default if not specified
+- Unbound uses OpenAI-compatible API with same model naming convention
+- Both providers support the same model identifiers (e.g., "openai/gpt-5.1")
 
 ### Markdown Rendering
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.

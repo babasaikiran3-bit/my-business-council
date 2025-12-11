@@ -32,15 +32,23 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### 2. Configure API Provider
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root. You can use either **OpenRouter** or **Unbound** as your API provider.
 
+**Option A: OpenRouter (default)**
 ```bash
+API_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-v1-...
 ```
-
 Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+
+**Option B: Unbound**
+```bash
+API_PROVIDER=unbound
+UNBOUND_API_KEY=your-unbound-api-key
+```
+Get your API key at [getunbound.ai](https://getunbound.ai/). Unbound provides a secure AI gateway with cost controls and compliance features.
 
 ### 3. Configure Models (Optional)
 
@@ -50,12 +58,14 @@ Edit `backend/config.py` to customize the council:
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-sonnet-4-5",  # Note: hyphen not dot for Unbound
     "x-ai/grok-4",
 ]
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
+
+> **Note for Unbound users:** Model identifiers may differ slightly between providers. For example, Claude models use hyphens (`claude-sonnet-4-5`) instead of dots (`claude-sonnet-4.5`).
 
 ## Running the Application
 
