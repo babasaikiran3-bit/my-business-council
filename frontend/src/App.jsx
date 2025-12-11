@@ -53,6 +53,18 @@ function App() {
     }
   };
 
+  const handleClearConversations = async () => {
+    if (!window.confirm('Clear all conversations? This cannot be undone.')) return;
+    try {
+      await api.deleteAllConversations();
+      setConversations([]);
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+    } catch (error) {
+      console.error('Failed to clear conversations:', error);
+    }
+  };
+
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
   };
@@ -188,6 +200,7 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onClearConversations={handleClearConversations}
       />
       <ChatInterface
         conversation={currentConversation}

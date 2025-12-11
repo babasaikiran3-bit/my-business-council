@@ -36,6 +36,22 @@
   border-color: #357abd;
 }
 
+.clear-history-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #d9534f;
+  color: #d9534f;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.clear-history-btn:hover {
+  background: #fcebea;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
