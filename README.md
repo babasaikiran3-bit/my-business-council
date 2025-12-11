@@ -58,14 +58,14 @@ Edit `backend/config.py` to customize the council:
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4-5",  # Note: hyphen not dot for Unbound
+    "anthropic/claude-sonnet-4.5",
     "x-ai/grok-4",
 ]
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
 
-> **Note for Unbound users:** Model identifiers may differ slightly between providers. For example, Claude models use hyphens (`claude-sonnet-4-5`) instead of dots (`claude-sonnet-4.5`).
+Model identifiers are automatically mapped between providers, so you can use the same names regardless of which API provider you choose.
 
 ## Running the Application
 

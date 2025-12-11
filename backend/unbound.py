@@ -4,6 +4,18 @@ import httpx
 from typing import List, Dict, Any, Optional
 from .config import UNBOUND_API_KEY, UNBOUND_API_URL
 
+# Model name mappings from OpenRouter format to Unbound format
+MODEL_MAPPINGS = {
+    "anthropic/claude-sonnet-4.5": "anthropic/claude-sonnet-4-5",
+    "anthropic/claude-opus-4.5": "anthropic/claude-opus-4-5",
+    "anthropic/claude-haiku-4.5": "anthropic/claude-haiku-4-5",
+}
+
+
+def _map_model_name(model: str) -> str:
+    """Map OpenRouter-style model names to Unbound format."""
+    return MODEL_MAPPINGS.get(model, model)
+
 
 async def query_model(
     model: str,
@@ -27,7 +39,7 @@ async def query_model(
     }
 
     payload = {
-        "model": model,
+        "model": _map_model_name(model),
         "messages": messages,
     }
 

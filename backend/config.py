@@ -24,11 +24,11 @@ def get_api_config():
         return UNBOUND_API_KEY, UNBOUND_API_URL
     return OPENROUTER_API_KEY, OPENROUTER_API_URL
 
-# Council members - model identifiers (Unbound supports OpenRouter-style names)
+# Council members - model identifiers
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4-5",  # Note: hyphen not dot for Unbound
+    "anthropic/claude-sonnet-4.5",
     "x-ai/grok-4",
 ]
 
