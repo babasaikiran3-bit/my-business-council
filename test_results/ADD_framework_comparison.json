@@ -1,0 +1,56 @@
+{
+  "test_question": "I'm thinking about starting a small online business selling handmade crafts. I have some experience with woodworking and pottery, but I'm not sure which would be better to focus on. What should I consider?",
+  "test_timestamp": "2025-12-10T23:06:30.823691",
+  "configurations": [
+    {
+      "name": "Baseline (No ADD)",
+      "mode": "none",
+      "description": "Standard LLM Council without ADD framework"
+    },
+    {
+      "name": "Test 1: All Models with ADD",
+      "mode": "all",
+      "description": "All council members and chairman use ADD framework"
+    },
+    {
+      "name": "Test 2: Chairman Only with ADD",
+      "mode": "chairman_only",
+      "description": "Only the chairman uses ADD framework"
+    },
+    {
+      "name": "Test 3: Council Only with ADD",
+      "mode": "council_only",
+      "description": "All council members use ADD, chairman does not"
+    }
+  ],
+  "summary": {
+    "none": {
+      "total_response_length": 19431,
+      "average_response_length": 4857.75,
+      "responses_with_add_language": 4,
+      "chairman_response_length": 6676,
+      "duration_seconds": 140.967561
+    },
+    "all": {
+      "total_response_length": 16968,
+      "average_response_length": 4242.0,
+      "responses_with_add_language": 4,
+      "chairman_response_length": 5216,
+      "duration_seconds": 160.016834
+    },
+    "chairman_only": {
+      "total_response_length": 17178,
+      "average_response_length": 4294.5,
+      "responses_with_add_language": 4,
+      "chairman_response_length": 5707,
+      "duration_seconds": 110.735709
+    },
+    "council_only": {
+      "total_response_length": 15753,
+      "average_response_length": 3938.25,
+      "responses_with_add_language": 4,
+      "chairman_response_length": 5809,
+      "duration_seconds": 127.622075
+    }
+  }
+}

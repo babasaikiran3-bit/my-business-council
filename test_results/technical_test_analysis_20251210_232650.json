@@ -1,0 +1,84 @@
+{
+  "test_question": "Explain how a recursive function works in Python, and provide an example that calculates the factorial of a number. Include error handling for edge cases.",
+  "test_type": "Technical/Implementation Question",
+  "test_date": "2025-12-10",
+  "configurations_tested": [
+    "none",
+    "all",
+    "chairman_only",
+    "council_only"
+  ],
+  "analysis": {
+    "none": {
+      "duration_seconds": 163.766814,
+      "avg_response_length": 3909.5,
+      "chairman_response_length": 5076,
+      "stage1_add_markers": 3,
+      "chairman_add_markers": true,
+      "all_stage1_markers": [
+        "do",
+        "execution"
+      ],
+      "chairman_markers": [
+        "do"
+      ]
+    },
+    "all": {
+      "duration_seconds": 169.089514,
+      "avg_response_length": 3097.0,
+      "chairman_response_length": 4340,
+      "stage1_add_markers": 3,
+      "chairman_add_markers": true,
+      "all_stage1_markers": [
+        "exploration",
+        "decide",
+        "\ud83d\udd34",
+        "assess",
+        "do",
+        "realm",
+        "\ud83d\udfe2",
+        "execution",
+        "\ud83d\udfe0"
+      ],
+      "chairman_markers": [
+        "do",
+        "execution"
+      ]
+    },
+    "chairman_only": {
+      "duration_seconds": 172.094479,
+      "avg_response_length": 4148.25,
+      "chairman_response_length": 4581,
+      "stage1_add_markers": 3,
+      "chairman_add_markers": true,
+      "all_stage1_markers": [
+        "do",
+        "execution"
+      ],
+      "chairman_markers": [
+        "do"
+      ]
+    },
+    "council_only": {
+      "duration_seconds": 163.86625,
+      "avg_response_length": 3129.0,
+      "chairman_response_length": 4104,
+      "stage1_add_markers": 3,
+      "chairman_add_markers": true,
+      "all_stage1_markers": [
+        "exploration",
+        "decide",
+        "\ud83d\udd34",
+        "assess",
+        "do",
+        "realm",
+        "\ud83d\udfe2",
+        "execution",
+        "\ud83d\udfe0"
+      ],
+      "chairman_markers": [
+        "do"
+      ]
+    }
+  }
+}
