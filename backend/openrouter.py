@@ -48,6 +48,12 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.HTTPStatusError as e:
+        # Only print errors that aren't rate limits (429) or payment issues (402)
+        # These are expected for free models and will be handled gracefully
+        if e.response.status_code not in [429, 402]:
+            print(f"Error querying model {model}: {e}")
+        return None
     except Exception as e:
         print(f"Error querying model {model}: {e}")
         return None
