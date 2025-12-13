@@ -1,21 +1,56 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, ENABLE_TOOLS
+from .composio_client import get_composio_client
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(
+    user_query: str,
+    user_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        user_id: Optional user ID for tool access
 
     Returns:
-        List of dicts with 'model' and 'response' keys
+        List of dicts with 'model', 'response', and optional 'tools_used' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    # Build the prompt with optional tool information
+    prompt = user_query
+    available_tools = []
+    
+    if ENABLE_TOOLS:
+        composio_client = get_composio_client()
+        if composio_client and composio_client.is_configured():
+            available_tools = composio_client.list_available_tools(user_id)
+            if available_tools:
+                tools_text = composio_client.format_tools_for_prompt(available_tools, user_id)
+                prompt = f"""You are a member of an AI council deliberating on the following query.
+
+Query: {user_query}
+
+## Available Tools
+
+You have access to the following tools that can help you gather information or perform actions:
+
+{tools_text}
+
+To use a tool, mention it explicitly in your response with the format:
+[TOOL: tool_name with parameters]
+
+You may use multiple tools if needed. Provide your analysis and response based on:
+1. Your training knowledge
+2. Information gathered from tools (if used)
+3. Your reasoning about the query
+
+Your response:"""
+    
+    messages = [{"role": "user", "content": prompt}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
@@ -24,10 +59,18 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     stage1_results = []
     for model, response in responses.items():
         if response is not None:  # Only include successful responses
-            stage1_results.append({
+            result = {
                 "model": model,
                 "response": response.get('content', '')
-            })
+            }
+            
+            # Track if tools were mentioned (Phase 2 enhancement)
+            if available_tools:
+                tools_mentioned = extract_tools_mentioned(response.get('content', ''), available_tools)
+                if tools_mentioned:
+                    result['tools_mentioned'] = tools_mentioned
+            
+            stage1_results.append(result)
 
     return stage1_results
 
@@ -174,6 +217,40 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     }
 
 
+def extract_tools_mentioned(response_text: str, available_tools: List[Dict[str, Any]]) -> List[str]:
+    """
+    Extract tool names mentioned in the response.
+    
+    Args:
+        response_text: The model's response text
+        available_tools: List of available tool definitions
+    
+    Returns:
+        List of tool names that were mentioned
+    """
+    import re
+    
+    tools_mentioned = []
+    tool_names = [tool['name'] for tool in available_tools]
+    
+    # Look for [TOOL: tool_name] pattern
+    tool_pattern = r'\[TOOL:\s*([^\]]+)\]'
+    matches = re.findall(tool_pattern, response_text, re.IGNORECASE)
+    
+    for match in matches:
+        # Extract the tool name (first word)
+        tool_name = match.split()[0] if match.split() else match
+        if tool_name in tool_names:
+            tools_mentioned.append(tool_name)
+    
+    # Also check if tool names are mentioned directly
+    for tool_name in tool_names:
+        if tool_name.lower() in response_text.lower() and tool_name not in tools_mentioned:
+            tools_mentioned.append(tool_name)
+    
+    return list(set(tools_mentioned))  # Remove duplicates
+
+
 def parse_ranking_from_text(ranking_text: str) -> List[str]:
     """
     Parse the FINAL RANKING section from the model's response.
@@ -293,18 +370,22 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    user_id: Optional[str] = None
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        user_id: Optional user ID for tool access
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, user_id)
 
     # If no models responded successfully, return error
     if not stage1_results:

@@ -24,3 +24,10 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
+
+# Composio configuration
+COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY")
+COMPOSIO_MCP_SERVER_ID = os.getenv("COMPOSIO_MCP_SERVER_ID")
+
+# Enable/disable tool-augmented deliberation
+ENABLE_TOOLS = os.getenv("ENABLE_TOOLS", "false").lower() == "true"
