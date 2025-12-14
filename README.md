@@ -101,7 +101,170 @@ Then open http://localhost:5173 in your browser.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
+- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API, Server-Sent Events (SSE) for streaming
+- **Frontend:** React + Vite 7.x, Tailwind CSS v4 (CSS-first configuration), shadcn/ui components
+- **UI Components:** shadcn/ui with Radix UI primitives (Button, Card, Tabs, Textarea, ScrollArea)
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript
+
+## UI Features
+
+### Resizable Sidebar
+The sidebar can be resized by dragging its right edge:
+- **Minimum width:** 240px
+- **Maximum width:** 480px
+- **Default width:** 288px
+- Width is automatically saved to localStorage and restored on page reload
+
+### Progressive Streaming Updates
+The application uses Server-Sent Events (SSE) for real-time updates:
+- See each stage complete as it happens (Stage 1 → Stage 2 → Stage 3)
+- Loading indicators show which stage is currently processing
+- No need to wait for the entire council deliberation to complete
+
+### shadcn/ui Design System
+The frontend uses the shadcn/ui component library with a zinc color palette:
+- Consistent, accessible components throughout the UI
+- Light mode theme with modern styling
+- Responsive design that works on different screen sizes
+
+## System Requirements
+
+### Node.js Version
+
+**Node.js 18+ is required** (20+ recommended). The frontend uses Vite 7.x which requires modern JavaScript features not available in older Node.js versions.
+
+To check your Node.js version:
+```bash
+node --version
+```
+
+If you see an error like `Unexpected token '??='` when starting the frontend, your Node.js version is too old.
+
+### Installing Node.js 20 via Homebrew (macOS)
+
+```bash
+brew install node@20
+```
+
+**Important:** Homebrew installs Node.js 20 as "keg-only", meaning it won't be automatically added to your PATH. To make it accessible system-wide, add the following to your shell configuration file:
+
+**For bash (~/.bash_profile):**
+```bash
+echo 'export PATH="/opt/homebrew/opt/node@20/bin:$PATH"' >> ~/.bash_profile
+source ~/.bash_profile
+```
+
+**For zsh (~/.zshrc):**
+```bash
+echo 'export PATH="/opt/homebrew/opt/node@20/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Note:** On Intel Macs, the Homebrew path is `/usr/local/opt/node@20/bin` instead of `/opt/homebrew/opt/node@20/bin`.
+
+## Troubleshooting
+
+### Frontend won't start / "Unexpected token" errors
+
+**Problem:** When running `npm run dev` or `./start.sh`, you see errors like:
+```
+SyntaxError: Unexpected token '??='
+```
+
+**Cause:** Your Node.js version is too old. Vite requires Node.js 18+.
+
+**Solution:**
+1. Install Node.js 20 via Homebrew: `brew install node@20`
+2. Add Node.js 20 to your PATH (see instructions above)
+3. Verify with `node --version` (should show v20.x.x)
+4. Restart your terminal and try again
+
+### "keg-only" Node.js installation
+
+**Problem:** After installing Node.js via Homebrew, `node --version` still shows the old version.
+
+**Cause:** Homebrew installed Node.js as "keg-only" (not symlinked to your PATH).
+
+**Solution:** Add the explicit PATH to your shell configuration file as shown above, then restart your terminal or run `source ~/.zshrc` (or `source ~/.bash_profile`).
+
+### Backend port conflict
+
+**Problem:** Backend fails to start with "Address already in use" error.
+
+**Solution:** The backend runs on port 8001 by default. Check if another application is using this port:
+```bash
+lsof -i :8001
+```
+Kill the conflicting process or modify the port in `backend/main.py`.
+
+### CSS changes not visible
+
+**Problem:** After making CSS changes, the UI doesn't update even after refreshing.
+
+**Cause:** Browser caching or Vite HMR not fully applying CSS updates.
+
+**Solution:**
+1. Perform a hard refresh: `Cmd + Shift + R` (macOS) or `Ctrl + Shift + R` (Windows/Linux)
+2. If that doesn't work, open DevTools → right-click the refresh button → "Empty Cache and Hard Reload"
+3. As a last resort, restart the Vite dev server
+
+### Sidebar padding not appearing
+
+**Problem:** The sidebar content appears too close to the edges with no horizontal padding.
+
+**Cause:** This can happen if there's a CSS conflict or if the ScrollArea component isn't structured correctly.
+
+**Solution:** Ensure padding is applied to an inner `<div>` wrapper inside ScrollArea, not to the ScrollArea component itself:
+```jsx
+// ✓ Correct
+<ScrollArea className="flex-1">
+  <div className="px-12 pt-5 pb-4">
+    {/* content */}
+  </div>
+</ScrollArea>
+
+// ✗ Wrong - padding won't reach content
+<ScrollArea className="flex-1 px-12 pt-5 pb-4">
+  {/* content */}
+</ScrollArea>
+```
+
+## Development Notes
+
+### Tailwind CSS v4 Configuration
+
+This project uses **Tailwind CSS v4** with CSS-first configuration. There is no `tailwind.config.js` file - this is intentional.
+
+**Configuration is done in `frontend/src/index.css` using the `@theme` directive:**
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(240 10% 3.9%);
+  --color-primary: hsl(240 5.9% 10%);
+  /* ... other colors */
+  --radius: 0.5rem;
+}
+```
+
+**PostCSS configuration (`frontend/postcss.config.js`):**
+```js
+export default {
+  plugins: {
+    '@tailwindcss/postcss': {},
+  },
+}
+```
+
+### shadcn/ui Integration
+
+The project uses shadcn/ui components with the zinc color palette. Components are located in `frontend/src/components/ui/` and include:
+- `button.jsx` - Button with multiple variants
+- `card.jsx` - Card container components
+- `tabs.jsx` - Tab navigation
+- `textarea.jsx` - Multiline text input
+- `scroll-area.jsx` - Scrollable content area
+
+To add new shadcn/ui components, adapt them manually for Tailwind v4 CSS-first configuration.

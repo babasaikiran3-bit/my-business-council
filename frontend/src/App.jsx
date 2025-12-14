@@ -1,14 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
-import './App.css';
 
 function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Track stage timings - stores start times and elapsed times
+  const [stageTimings, setStageTimings] = useState({
+    stage1: { startTime: null, elapsed: 0, completed: false },
+    stage2: { startTime: null, elapsed: 0, completed: false },
+    stage3: { startTime: null, elapsed: 0, completed: false },
+  });
+
+  // Track individual model statuses: 'pending' | 'processing' | 'received' | 'failed'
+  const [modelStatuses, setModelStatuses] = useState({});
+
+  // Track individual model response times in milliseconds
+  const [modelTimings, setModelTimings] = useState({});
+
+  // Timer interval ref for cleanup
+  const timerIntervalRef = useRef(null);
+
+  // Ref to hold latest stageTimings for interval callback
+  const latestStageTimingsRef = useRef(stageTimings);
+
+  // Compute whether any stage is active
+  const hasActiveStage = Object.values(stageTimings).some(
+    (timing) => timing.startTime && !timing.completed
+  );
 
   // Load conversations on mount
   useEffect(() => {
@@ -21,6 +44,50 @@ function App() {
       loadConversation(currentConversationId);
     }
   }, [currentConversationId]);
+
+  // Keep latestStageTimingsRef in sync with stageTimings
+  useEffect(() => {
+    latestStageTimingsRef.current = stageTimings;
+  }, [stageTimings]);
+
+  // Timer update effect - updates elapsed time every 100ms while stages are in progress
+  useEffect(() => {
+    if (hasActiveStage) {
+      timerIntervalRef.current = setInterval(() => {
+        const current = latestStageTimingsRef.current;
+        setStageTimings((prev) => {
+          const updated = { ...prev };
+          for (const stage of ['stage1', 'stage2', 'stage3']) {
+            if (current[stage].startTime && !current[stage].completed) {
+              updated[stage] = {
+                ...prev[stage],
+                elapsed: Date.now() - current[stage].startTime,
+              };
+            }
+          }
+          return updated;
+        });
+      }, 100);
+    }
+
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    };
+  }, [hasActiveStage]);
+
+  // Helper to reset progress state for new message
+  const resetProgressState = () => {
+    setStageTimings({
+      stage1: { startTime: null, elapsed: 0, completed: false },
+      stage2: { startTime: null, elapsed: 0, completed: false },
+      stage3: { startTime: null, elapsed: 0, completed: false },
+    });
+    setModelStatuses({});
+    setModelTimings({});
+  };
 
   const loadConversations = async () => {
     try {
@@ -61,6 +128,8 @@ function App() {
     if (!currentConversationId) return;
 
     setIsLoading(true);
+    resetProgressState();
+
     try {
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
@@ -70,6 +139,7 @@ function App() {
       }));
 
       // Create a partial assistant message that will be updated progressively
+      // Start with stage1 loading true so the loading indicator shows immediately
       const assistantMessage = {
         role: 'assistant',
         stage1: null,
@@ -77,7 +147,7 @@ function App() {
         stage3: null,
         metadata: null,
         loading: {
-          stage1: false,
+          stage1: true,
           stage2: false,
           stage3: false,
         },
@@ -93,59 +163,128 @@ function App() {
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
+            // Initialize model statuses from the models list
+            if (event.models) {
+              const initialStatuses = {};
+              event.models.forEach((model) => {
+                initialStatuses[model] = 'processing';
+              });
+              setModelStatuses(initialStatuses);
+            }
+            // Start stage 1 timer
+            setStageTimings((prev) => ({
+              ...prev,
+              stage1: { startTime: Date.now(), elapsed: 0, completed: false },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage1: true },
+              };
               return { ...prev, messages };
             });
             break;
 
+          case 'model_response':
+            // Update individual model status
+            setModelStatuses((prev) => ({
+              ...prev,
+              [event.model]: event.success ? 'received' : 'failed',
+            }));
+            // Store individual model response time
+            setModelTimings((prev) => ({
+              ...prev,
+              [event.model]: event.elapsed_ms,
+            }));
+            break;
+
           case 'stage1_complete':
+            // Mark stage 1 as completed
+            setStageTimings((prev) => ({
+              ...prev,
+              stage1: { ...prev.stage1, completed: true },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage1: event.data,
+                loading: { ...lastMsg.loading, stage1: false },
+              };
               return { ...prev, messages };
             });
             break;
 
           case 'stage2_start':
+            // Start stage 2 timer
+            setStageTimings((prev) => ({
+              ...prev,
+              stage2: { startTime: Date.now(), elapsed: 0, completed: false },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage2: true },
+              };
               return { ...prev, messages };
             });
             break;
 
           case 'stage2_complete':
+            // Mark stage 2 as completed
+            setStageTimings((prev) => ({
+              ...prev,
+              stage2: { ...prev.stage2, completed: true },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage2: event.data,
+                metadata: event.metadata,
+                loading: { ...lastMsg.loading, stage2: false },
+              };
               return { ...prev, messages };
             });
             break;
 
           case 'stage3_start':
+            // Start stage 3 timer
+            setStageTimings((prev) => ({
+              ...prev,
+              stage3: { startTime: Date.now(), elapsed: 0, completed: false },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage3: true },
+              };
               return { ...prev, messages };
             });
             break;
 
           case 'stage3_complete':
+            // Mark stage 3 as completed
+            setStageTimings((prev) => ({
+              ...prev,
+              stage3: { ...prev.stage3, completed: true },
+            }));
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage3: event.data,
+                loading: { ...lastMsg.loading, stage3: false },
+              };
               return { ...prev, messages };
             });
             break;
@@ -182,7 +321,7 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
@@ -193,6 +332,9 @@ function App() {
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        stageTimings={stageTimings}
+        modelStatuses={modelStatuses}
+        modelTimings={modelTimings}
       />
     </div>
   );

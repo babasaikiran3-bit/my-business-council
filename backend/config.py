@@ -29,4 +29,9 @@ PROMPT_IMPROVER_MODEL = "google/gemini-3-pro-preview"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Data directory for conversation storage
-DATA_DIR = "data/conversations"
+# Use /tmp for Vercel serverless functions, otherwise use local directory
+IS_VERCEL = os.getenv("VERCEL", "false").lower() == "1" or os.getenv("VERCEL_ENV") is not None
+if IS_VERCEL:
+    DATA_DIR = "/tmp/conversations"
+else:
+    DATA_DIR = "data/conversations"

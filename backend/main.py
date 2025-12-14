@@ -10,7 +10,17 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, improve_user_prompt
+from .council import (
+    run_full_council,
+    generate_conversation_title,
+    stage1_collect_responses,
+    stage1_collect_responses_with_progress,
+    stage2_collect_rankings,
+    stage3_synthesize_final,
+    calculate_aggregate_rankings,
+    improve_user_prompt,
+    get_council_models,
+)
 
 app = FastAPI(title="LLM Council API")
 
@@ -139,7 +149,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
     Send a message and stream the 3-stage council process.
-    Returns Server-Sent Events as each stage completes.
+    Returns Server-Sent Events as each stage completes, including individual model completions.
     """
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
@@ -149,7 +159,24 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Get the list of council models for the frontend
+    council_models = get_council_models()
+
     async def event_generator():
+        # Queue for model completion events during stage 1
+        model_events = asyncio.Queue()
+
+        async def on_model_complete(model: str, response_content, success: bool, elapsed_ms: int):
+            """Callback when a model completes - adds event to queue."""
+            event = {
+                'type': 'model_response',
+                'model': model,
+                'success': success,
+                'elapsed_ms': elapsed_ms,
+                'response_content': response_content,
+            }
+            await model_events.put(event)
+
         try:
             # Add user message
             storage.add_user_message(conversation_id, request.content)
@@ -159,9 +186,23 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            # Stage 1: Collect responses with individual model progress
+            yield f"data: {json.dumps({'type': 'stage1_start', 'models': council_models})}\n\n"
+
+            # Start stage1 with progress tracking
+            stage1_task = asyncio.create_task(
+                stage1_collect_responses_with_progress(request.content, on_model_complete)
+            )
+
+            # Emit model completion events as they arrive
+            models_remaining = len(council_models)
+            while models_remaining > 0:
+                event = await model_events.get()
+                yield f"data: {json.dumps(event)}\n\n"
+                models_remaining -= 1
+
+            # Wait for stage1 to complete and get results
+            stage1_results = await stage1_task
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings

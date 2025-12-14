@@ -4,12 +4,21 @@ import { api } from '../api';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
-import './ChatInterface.css';
+import { Stage1Progress, StageProgress } from './ProgressIndicator';
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Card, CardContent } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Sparkles, Send, Undo2, Loader2, User, Users } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  stageTimings,
+  modelStatuses,
+  modelTimings,
 }) {
   const [input, setInput] = useState('');
   const [isImproving, setIsImproving] = useState(false);
@@ -34,7 +43,6 @@ export default function ChatInterface({
   };
 
   const handleKeyDown = (e) => {
-    // Submit on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -43,10 +51,8 @@ export default function ChatInterface({
 
   const handleImprovePrompt = async () => {
     if (!input.trim() || isImproving || isLoading) return;
-
     setIsImproving(true);
     setOriginalPrompt(input);
-
     try {
       const result = await api.improvePrompt(input);
       setInput(result.improved_prompt);
@@ -66,143 +72,172 @@ export default function ChatInterface({
 
   if (!conversation) {
     return (
-      <div className="chat-interface">
-        <div className="empty-state">
-          <h2>Welcome to LLM Council</h2>
-          <p>Create a new conversation to get started</p>
+      <div className="flex-1 flex items-center justify-center bg-background">
+        <div className="text-center">
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Welcome to LLM Council</h2>
+          <p className="text-muted-foreground">Create a new conversation to get started</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="chat-interface">
-      <div className="messages-container">
+    <div className="flex-1 flex flex-col bg-background h-screen">
+      <ScrollArea className="flex-1 p-6">
         {conversation.messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <h2 className="text-2xl font-semibold text-foreground mb-2">Start a conversation</h2>
+              <p className="text-muted-foreground">Ask a question to consult the LLM Council</p>
+            </div>
           </div>
         ) : (
-          conversation.messages.map((msg, index) => (
-            <div key={index} className="message-group">
-              {msg.role === 'user' ? (
-                <div className="user-message">
-                  <div className="message-label">You</div>
-                  <div className="message-content">
-                    <div className="markdown-content">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+          <div className="space-y-6 max-w-4xl mx-auto">
+            {conversation.messages.map((msg, index) => (
+              <div key={index} className="space-y-4">
+                {msg.role === 'user' ? (
+                  <Card className="bg-muted/50">
+                    <CardContent className="pt-4">
+                      <div className="flex items-center gap-2 mb-2 text-sm font-medium">
+                        <User className="h-4 w-4" />
+                        You
+                      </div>
+                      <div className="markdown-content">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Users className="h-4 w-4" />
+                      LLM Council
                     </div>
+
+                    {msg.loading?.stage1 && Object.keys(modelStatuses).length > 0 && (
+                      <Stage1Progress
+                        modelStatuses={modelStatuses}
+                        timing={stageTimings.stage1}
+                      />
+                    )}
+                    {msg.loading?.stage1 && Object.keys(modelStatuses).length === 0 && (
+                      <StageProgress
+                        stage={1}
+                        label="Stage 1: Collecting responses..."
+                        timing={stageTimings.stage1}
+                      />
+                    )}
+                    {msg.stage1 && (
+                      <Stage1
+                        responses={msg.stage1}
+                        timing={stageTimings.stage1}
+                        modelStatuses={modelStatuses}
+                        modelTimings={modelTimings}
+                      />
+                    )}
+
+                    {msg.loading?.stage2 && (
+                      <StageProgress
+                        stage={2}
+                        label="Stage 2: Peer rankings..."
+                        timing={stageTimings.stage2}
+                      />
+                    )}
+                    {msg.stage2 && (
+                      <Stage2
+                        rankings={msg.stage2}
+                        labelToModel={msg.metadata?.label_to_model}
+                        aggregateRankings={msg.metadata?.aggregate_rankings}
+                        timing={stageTimings.stage2}
+                      />
+                    )}
+
+                    {msg.loading?.stage3 && (
+                      <StageProgress
+                        stage={3}
+                        label="Stage 3: Final synthesis..."
+                        timing={stageTimings.stage3}
+                      />
+                    )}
+                    {msg.stage3 && (
+                      <Stage3
+                        finalResponse={msg.stage3}
+                        timing={stageTimings.stage3}
+                      />
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
-
-                  {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
-                    </div>
-                  )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
-
-                  {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
-                    </div>
-                  )}
-                  {msg.stage2 && (
-                    <Stage2
-                      rankings={msg.stage2}
-                      labelToModel={msg.metadata?.label_to_model}
-                      aggregateRankings={msg.metadata?.aggregate_rankings}
-                    />
-                  )}
-
-                  {/* Stage 3 */}
-                  {msg.loading?.stage3 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
-                    </div>
-                  )}
-                  {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
-                </div>
-              )}
-            </div>
-          ))
-        )}
-
-        {isLoading && (
-          <div className="loading-indicator">
-            <div className="spinner"></div>
-            <span>Consulting the council...</span>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
         <div ref={messagesEndRef} />
-      </div>
+      </ScrollArea>
 
       {conversation.messages.length === 0 && (
-        <form className="input-form" onSubmit={handleSubmit}>
-          <div className="input-section">
-            <textarea
-              className="message-input"
-              placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || isImproving}
-              rows={3}
-            />
-
-            {/* Show original prompt for comparison when improved */}
-            {originalPrompt && (
-              <div className="original-prompt-notice">
-                <div className="original-prompt-header">
-                  <span>📝 Original prompt:</span>
-                  <button
-                    type="button"
-                    className="undo-button"
-                    onClick={handleUndoImprovement}
-                  >
-                    ↩ Undo
-                  </button>
-                </div>
-                <div className="original-prompt-text">{originalPrompt}</div>
+        <div className="border-t p-6 bg-background">
+          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-3">
+            {/* Horizontal layout: Textarea on left, buttons stacked on right */}
+            <div className="flex gap-3 items-stretch">
+              <Textarea
+                placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || isImproving}
+                rows={3}
+                className="resize-y flex-1"
+              />
+              <div className="flex flex-col gap-2 justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleImprovePrompt}
+                  disabled={!input.trim() || isImproving || isLoading}
+                  className="whitespace-nowrap"
+                >
+                  {isImproving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Improving...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Improve Prompt
+                    </>
+                  )}
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!input.trim() || isLoading || isImproving}
+                  className="whitespace-nowrap"
+                >
+                  <Send className="h-4 w-4 mr-2" />
+                  Send
+                </Button>
               </div>
-            )}
-          </div>
+            </div>
 
-          <div className="button-group">
-            <button
-              type="button"
-              className="improve-button"
-              onClick={handleImprovePrompt}
-              disabled={!input.trim() || isImproving || isLoading}
-            >
-              {isImproving ? (
-                <>
-                  <span className="spinner spinner-small"></span>
-                  <span>Improving...</span>
-                </>
-              ) : (
-                '✨ Improve Prompt'
-              )}
-            </button>
-            <button
-              type="submit"
-              className="send-button"
-              disabled={!input.trim() || isLoading || isImproving}
-            >
-              Send
-            </button>
-          </div>
-        </form>
+            {originalPrompt && (
+              <Card className="bg-muted/50">
+                <CardContent className="pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Original prompt:</span>
+                    <Button type="button" variant="ghost" size="sm" onClick={handleUndoImprovement}>
+                      <Undo2 className="h-3 w-3 mr-1" />
+                      Undo
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{originalPrompt}</p>
+                </CardContent>
+              </Card>
+            )}
+          </form>
+        </div>
       )}
     </div>
   );

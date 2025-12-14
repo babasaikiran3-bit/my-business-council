@@ -6,6 +6,32 @@ This file contains technical details, architectural decisions, and important imp
 
 LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
 
+## Recent Changes (December 2024)
+
+### Tailwind CSS v4 Migration
+- **CSS-first configuration**: No `tailwind.config.js` file - configuration is done via `@theme` directive in `index.css`
+- **Import syntax**: Uses `@import "tailwindcss"` instead of `@tailwind` directives
+- **PostCSS plugin**: Uses `@tailwindcss/postcss` instead of `tailwindcss`
+
+### shadcn/ui Component Integration
+- Migrated to shadcn/ui component library with Radix UI primitives
+- Uses **zinc color palette** (neutral grays) for the design system
+- Components: Button, Card, Tabs, Textarea, ScrollArea
+
+### Resizable Sidebar Feature
+- Drag the right edge to resize (min: 240px, max: 480px, default: 288px)
+- Width persists in localStorage with key `llm-council-sidebar-width`
+- Visual grip indicator appears on hover
+
+### CSS Reset Fix
+- **Removed** `margin: 0; padding: 0` from the universal selector (`*`)
+- This was overriding Tailwind utility classes like `px-14` and `px-12`
+- Tailwind's Preflight already handles CSS normalization
+
+### ScrollArea Padding Fix
+- Padding must be applied to an **inner wrapper div**, NOT the ScrollArea root
+- Radix ScrollArea wraps content in a Viewport that doesn't inherit root padding
+
 ## Architecture
 
 ### Backend Structure (`backend/`)
@@ -73,18 +99,27 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Handles message sending and metadata storage
 - Important: metadata is stored in the UI state for display but not persisted to backend JSON
 
+**`components/Sidebar.jsx`**
+- Resizable sidebar with drag-to-resize functionality
+- localStorage persistence for width (key: `llm-council-sidebar-width`)
+- Min: 240px, Max: 480px, Default: 288px
+- Uses shadcn/ui ScrollArea with padding fix (see Common Gotchas)
+- Custom horizontal padding: `px-14` for header, `px-12` for conversation list
+
 **`components/ChatInterface.jsx`**
-- Multiline textarea (3 rows, resizable)
+- Multiline textarea (3 rows, resizable) using shadcn/ui Textarea
 - Enter to send, Shift+Enter for new line
 - User messages wrapped in markdown-content class for padding
+- Uses shadcn/ui Card, Button, ScrollArea components
 - **Prompt Improvement Feature**:
   - "✨ Improve Prompt" button uses `/api/improve-prompt` endpoint
   - Shows original prompt below textarea for comparison after improvement
   - "↩ Undo" button reverts to original prompt if needed
 
 **`components/Stage1.jsx`**
-- Tab view of individual model responses
+- Tab view of individual model responses using shadcn/ui Tabs
 - ReactMarkdown rendering with markdown-content wrapper
+- Wrapped in shadcn/ui Card component
 
 **`components/Stage2.jsx`**
 - **Critical Feature**: Tab view showing RAW evaluation text from each model
@@ -95,13 +130,23 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`components/Stage3.jsx`**
 - Final synthesized answer from chairman
-- Green-tinted background (#f0fff0) to highlight conclusion
+- Uses `bg-muted/30` background to highlight conclusion (shadcn/ui style)
 
-**Styling (`*.css`)**
-- Light mode theme (not dark mode)
-- Primary color: #4a90e2 (blue)
-- Global markdown styling in `index.css` with `.markdown-content` class
-- 12px padding on all markdown content to prevent cluttered appearance
+**`components/ui/*.jsx`** (shadcn/ui Components)
+- `button.jsx` - Button with variants (default, destructive, outline, secondary, ghost, link)
+- `card.jsx` - Card, CardHeader, CardContent, CardTitle, CardDescription, CardFooter
+- `tabs.jsx` - Tabs, TabsList, TabsTrigger, TabsContent
+- `textarea.jsx` - Textarea with focus ring styling
+- `scroll-area.jsx` - ScrollArea, ScrollBar (Radix-based)
+
+**`lib/utils.js`**
+- `cn()` function - merges Tailwind classes using `clsx` and `tailwind-merge`
+
+**Styling (`index.css`)**
+- Light mode theme with shadcn/ui zinc color palette
+- CSS-first Tailwind v4 configuration via `@theme` directive
+- Global markdown styling with `.markdown-content` class
+- No `tailwind.config.js` - all theme config in CSS
 
 ## Key Design Decisions
 
@@ -150,21 +195,56 @@ All ReactMarkdown components must be wrapped in `<div className="markdown-conten
 ### Model Configuration
 Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
 
+## System Requirements
+
+### Node.js Version Requirement
+- **Node.js 18+ required** (20+ recommended)
+- Vite 7.x uses modern JavaScript features (`??=` operator) not available in Node.js 14.x
+- Error symptom: `SyntaxError: Unexpected token '??='`
+
+### Installing Node.js 20 on macOS (Homebrew)
+```bash
+brew install node@20
+```
+
+**Important:** Node.js 20 is installed as "keg-only" (not symlinked to PATH). Add to shell config:
+
+```bash
+# For Apple Silicon Macs (~/.zshrc or ~/.bash_profile)
+export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+
+# For Intel Macs
+export PATH="/usr/local/opt/node@20/bin:$PATH"
+```
+
+Then run `source ~/.zshrc` or restart terminal.
+
 ## Common Gotchas
 
 1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+5. **Node.js Version Too Old**: If frontend fails with `Unexpected token '??='`, upgrade to Node.js 18+ (see System Requirements above)
+6. **Keg-only Node.js**: After `brew install node@20`, you must manually add the PATH to your shell config file
+7. **CSS Reset Overriding Tailwind**: Never add `padding: 0` or `margin: 0` to the universal selector (`*`) - this overrides Tailwind utilities. Tailwind's Preflight already handles CSS normalization.
+8. **ScrollArea Padding Not Working**: Radix ScrollArea wraps content in a Viewport. Padding applied to ScrollArea root doesn't reach content. **Solution**: Wrap content in a `<div>` with padding inside ScrollArea.
+9. **CSS Changes Not Visible**: Always hard refresh (`Cmd+Shift+R`) after CSS changes. Vite's HMR may not clear browser cache for CSS.
+10. **No tailwind.config.js**: This is intentional for Tailwind CSS v4. Configuration is done via `@theme` directive in `index.css`, not JavaScript.
 
 ## Future Enhancement Ideas
 
 - Configurable council/chairman via UI instead of config file
 - ~~Streaming responses instead of batch loading~~ ✅ Implemented via SSE
+- ~~Resizable sidebar~~ ✅ Implemented with localStorage persistence
+- ~~shadcn/ui component migration~~ ✅ Completed with zinc color palette
 - Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
 - Support for reasoning models (o1, etc.) with special handling
+- Dark mode toggle (theme infrastructure is in place via CSS variables)
+- Keyboard shortcuts for common actions (new conversation, toggle sidebar)
+- Search/filter conversations in sidebar
 
 ## Testing Notes
 

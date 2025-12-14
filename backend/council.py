@@ -1,8 +1,13 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
+from typing import List, Dict, Any, Tuple, Callable, Optional
+from .openrouter import query_models_parallel, query_model, query_models_parallel_with_progress
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
+
+
+def get_council_models() -> List[str]:
+    """Return the list of council models."""
+    return COUNCIL_MODELS.copy()
 
 
 async def improve_user_prompt(original_prompt: str) -> str:
@@ -57,6 +62,42 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
                 "model": model,
                 "response": response.get('content', '')
             })
+
+    return stage1_results
+
+
+async def stage1_collect_responses_with_progress(
+    user_query: str,
+    on_model_complete: Optional[Callable] = None
+) -> List[Dict[str, Any]]:
+    """
+    Stage 1: Collect individual responses with progress callbacks.
+
+    Args:
+        user_query: The user's question
+        on_model_complete: Async callback(model, response_content, success, elapsed_ms) called when each model completes
+
+    Returns:
+        List of dicts with 'model' and 'response' keys
+    """
+    messages = [{"role": "user", "content": user_query}]
+    stage1_results = []
+
+    async def handle_model_complete(model: str, response: Optional[Dict], success: bool, elapsed_ms: int):
+        if success and response:
+            content = response.get('content', '')
+            stage1_results.append({
+                "model": model,
+                "response": content
+            })
+            if on_model_complete:
+                await on_model_complete(model, content, True, elapsed_ms)
+        else:
+            if on_model_complete:
+                await on_model_complete(model, None, False, elapsed_ms)
+
+    # Query all models in parallel with progress
+    await query_models_parallel_with_progress(COUNCIL_MODELS, messages, handle_model_complete)
 
     return stage1_results
 

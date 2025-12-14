@@ -1,25 +1,57 @@
-:root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss";
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* shadcn/ui default theme variables - matching ui.shadcn.com */
+@theme {
+  /* Light mode colors based on shadcn/ui zinc palette */
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(240 10% 3.9%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(240 10% 3.9%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(240 10% 3.9%);
+  --color-primary: hsl(240 5.9% 10%);
+  --color-primary-foreground: hsl(0 0% 98%);
+  --color-secondary: hsl(240 4.8% 95.9%);
+  --color-secondary-foreground: hsl(240 5.9% 10%);
+  --color-muted: hsl(240 4.8% 95.9%);
+  --color-muted-foreground: hsl(240 3.8% 46.1%);
+  --color-accent: hsl(240 4.8% 95.9%);
+  --color-accent-foreground: hsl(240 5.9% 10%);
+  --color-destructive: hsl(0 84.2% 60.2%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+  --color-border: hsl(240 5.9% 90%);
+  --color-input: hsl(240 5.9% 90%);
+  --color-ring: hsl(240 5.9% 10%);
+  --color-success: hsl(142.1 76.2% 36.3%);
+  --color-success-foreground: hsl(0 0% 98%);
+  /* shadcn/ui default radius values */
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-* {
-  margin: 0;
-  padding: 0;
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+  border-color: var(--color-border);
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f5f5f5;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
@@ -28,13 +60,14 @@ body {
   overflow: hidden;
 }
 
-/* Global markdown styling */
+/* Markdown styling - clean and minimal */
 .markdown-content {
-  padding: 12px;
+  font-size: 0.875rem;
+  line-height: 1.625;
 }
 
 .markdown-content p {
-  margin: 0 0 12px 0;
+  margin-bottom: 0.75rem;
 }
 
 .markdown-content p:last-child {
@@ -44,45 +77,50 @@ body {
 .markdown-content h1,
 .markdown-content h2,
 .markdown-content h3,
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
-  margin: 16px 0 8px 0;
+.markdown-content h4 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
 }
+
+.markdown-content h1 { font-size: 1.5rem; }
+.markdown-content h2 { font-size: 1.25rem; }
+.markdown-content h3 { font-size: 1.125rem; }
+.markdown-content h4 { font-size: 1rem; }
 
 .markdown-content h1:first-child,
 .markdown-content h2:first-child,
 .markdown-content h3:first-child,
-.markdown-content h4:first-child,
-.markdown-content h5:first-child,
-.markdown-content h6:first-child {
+.markdown-content h4:first-child {
   margin-top: 0;
 }
 
 .markdown-content ul,
 .markdown-content ol {
-  margin: 0 0 12px 0;
-  padding-left: 24px;
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
 }
 
 .markdown-content li {
-  margin: 4px 0;
+  margin: 0.25rem 0;
 }
 
 .markdown-content pre {
-  background: #f5f5f5;
-  padding: 12px;
-  border-radius: 4px;
+  background: var(--color-muted);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
   overflow-x: auto;
-  margin: 0 0 12px 0;
+  margin-bottom: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .markdown-content code {
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: monospace;
-  font-size: 0.9em;
+  background: var(--color-muted);
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
 }
 
 .markdown-content pre code {
@@ -91,8 +129,18 @@ body {
 }
 
 .markdown-content blockquote {
-  margin: 0 0 12px 0;
-  padding-left: 16px;
-  border-left: 4px solid #ddd;
-  color: #666;
+  margin-bottom: 0.75rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+.markdown-content a {
+  color: var(--color-foreground);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.markdown-content strong {
+  font-weight: 600;
 }

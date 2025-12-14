@@ -1,7 +1,7 @@
 """OpenRouter API client for making LLM requests."""
 
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 
 
@@ -77,3 +77,44 @@ async def query_models_parallel(
 
     # Map models to their responses
     return {model: response for model, response in zip(models, responses)}
+
+
+async def query_models_parallel_with_progress(
+    models: List[str],
+    messages: List[Dict[str, str]],
+    on_model_complete: Optional[Callable[[str, Optional[Dict[str, Any]], bool, int], Awaitable[None]]] = None
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """
+    Query multiple models in parallel with progress callbacks.
+
+    Args:
+        models: List of OpenRouter model identifiers
+        messages: List of message dicts to send to each model
+        on_model_complete: Callback function(model, response, success, elapsed_ms) called when each model completes
+
+    Returns:
+        Dict mapping model identifier to response dict (or None if failed)
+    """
+    import asyncio
+    import time
+
+    results = {}
+
+    async def query_with_callback(model: str):
+        start_time = time.time()
+        response = await query_model(model, messages)
+        elapsed_ms = int((time.time() - start_time) * 1000)  # Convert to milliseconds
+        success = response is not None
+        if on_model_complete:
+            await on_model_complete(model, response, success, elapsed_ms)
+        return model, response
+
+    # Create tasks for all models
+    tasks = [query_with_callback(model) for model in models]
+
+    # Wait for all to complete (as_completed gives us results as they finish)
+    for coro in asyncio.as_completed(tasks):
+        model, response = await coro
+        results[model] = response
+
+    return results

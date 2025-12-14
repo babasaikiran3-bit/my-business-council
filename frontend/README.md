@@ -1,16 +1,71 @@
-# React + Vite
+# LLM Council Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React frontend for the LLM Council application, built with Vite and Tailwind CSS v4.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **React** - UI framework
+- **Vite 7.x** - Build tool and dev server (requires Node.js 18+)
+- **Tailwind CSS v4** - CSS-first configuration (no `tailwind.config.js`)
+- **shadcn/ui** - Component library with Radix UI primitives
+- **react-markdown** - Markdown rendering for model responses
 
-## React Compiler
+## Quick Start
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Install dependencies
+npm install
 
-## Expanding the ESLint configuration
+# Start development server
+npm run dev
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# Build for production
+npm run build
+```
+
+The app runs at http://localhost:5173 by default.
+
+## Tailwind CSS v4 Configuration
+
+This project uses CSS-first Tailwind configuration. All theme settings are in `src/index.css`:
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(240 10% 3.9%);
+  /* ... */
+}
+```
+
+There is **no `tailwind.config.js` file** - this is intentional for Tailwind v4.
+
+## Component Structure
+
+```
+src/
+├── components/
+│   ├── ui/          # shadcn/ui components (Button, Card, Tabs, etc.)
+│   ├── Sidebar.jsx  # Resizable sidebar with conversation list
+│   ├── ChatInterface.jsx  # Main chat input and message display
+│   ├── Stage1.jsx   # Individual model responses
+│   ├── Stage2.jsx   # Peer evaluations and rankings
+│   └── Stage3.jsx   # Final synthesized answer
+├── lib/
+│   └── utils.js     # cn() utility for class merging
+├── api.js           # API client with SSE streaming support
+├── App.jsx          # Main application component
+└── index.css        # Tailwind theme and global styles
+```
+
+## Common Issues
+
+### CSS changes not appearing
+Run a hard refresh: `Cmd + Shift + R` (macOS) or `Ctrl + Shift + R` (Windows/Linux)
+
+### Node.js version error
+Vite 7.x requires Node.js 18+. Install Node.js 20: `brew install node@20`
+
+### Adding new shadcn/ui components
+Manually adapt components for Tailwind v4 CSS-first configuration.
