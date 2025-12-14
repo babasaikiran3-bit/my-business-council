@@ -11,8 +11,14 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
-- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
+- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers) - currently 5 models:
+  - `openai/gpt-5.2-pro`
+  - `google/gemini-3-pro-preview`
+  - `anthropic/claude-opus-4.5`
+  - `x-ai/grok-code-fast-1`
+  - `x-ai/grok-4`
+- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer) - currently `google/gemini-3-pro-preview`
+- Contains `PROMPT_IMPROVER_MODEL` (model for "Improve Prompt" feature) - currently `google/gemini-3-pro-preview`
 - Uses environment variable `OPENROUTER_API_KEY` from `.env`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
@@ -23,6 +29,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Graceful degradation: returns None on failure, continues with successful responses
 
 **`council.py`** - The Core Logic
+- `improve_user_prompt()`: Uses `PROMPT_IMPROVER_MODEL` to rewrite user prompts for clarity
 - `stage1_collect_responses()`: Parallel queries to all council models
 - `stage2_collect_rankings()`:
   - Anonymizes responses as "Response A, B, C, etc."
@@ -33,6 +40,8 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
 - `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+- `generate_conversation_title()`: Uses `google/gemini-2.5-flash` for fast title generation from first message
+- `run_full_council()`: Orchestrates the complete 3-stage process
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
@@ -42,8 +51,20 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
-- POST `/api/conversations/{id}/message` returns metadata in addition to stages
-- Metadata includes: label_to_model mapping and aggregate_rankings
+- API Endpoints:
+  - `GET /` - Health check
+  - `POST /api/improve-prompt` - Improve user prompt using LLM
+  - `GET /api/conversations` - List all conversations
+  - `POST /api/conversations` - Create new conversation
+  - `GET /api/conversations/{id}` - Get specific conversation
+  - `POST /api/conversations/{id}/message` - Send message (batch response)
+  - `POST /api/conversations/{id}/message/stream` - Send message with SSE streaming
+- Streaming endpoint sends Server-Sent Events for progressive UI updates:
+  - `stage1_start`, `stage1_complete`, `stage2_start`, `stage2_complete`, `stage3_start`, `stage3_complete`
+  - `title_complete` - when conversation title is generated
+  - `complete` - when all stages finish
+  - `error` - on failure
+- Metadata returned includes: label_to_model mapping and aggregate_rankings
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -56,6 +77,10 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Multiline textarea (3 rows, resizable)
 - Enter to send, Shift+Enter for new line
 - User messages wrapped in markdown-content class for padding
+- **Prompt Improvement Feature**:
+  - "✨ Improve Prompt" button uses `/api/improve-prompt` endpoint
+  - Shows original prompt below textarea for comparison after improvement
+  - "↩ Undo" button reverts to original prompt if needed
 
 **`components/Stage1.jsx`**
 - Tab view of individual model responses
@@ -93,7 +118,7 @@ This strict format allows reliable parsing while still getting thoughtful evalua
 
 ### De-anonymization Strategy
 - Models receive: "Response A", "Response B", etc.
-- Backend creates mapping: `{"Response A": "openai/gpt-5.1", ...}`
+- Backend creates mapping: `{"Response A": "openai/gpt-5.2-pro", ...}`
 - Frontend displays model names in **bold** for readability
 - Users see explanation that original evaluation used anonymous labels
 - This prevents bias while maintaining transparency
@@ -135,7 +160,7 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 ## Future Enhancement Ideas
 
 - Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
+- ~~Streaming responses instead of batch loading~~ ✅ Implemented via SSE
 - Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
@@ -144,6 +169,8 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 ## Testing Notes
 
 Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+
+**Note:** The `test_openrouter.py` file may need to be created. You can test OpenRouter connectivity manually by running the backend and making API calls via the frontend or curl.
 
 ## Data Flow Summary
 

@@ -60,9 +60,10 @@ Edit `backend/config.py` to customize the council:
 ```python
 # Council members - the LLMs that answer your question
 COUNCIL_MODELS = [
-    "openai/gpt-5.1",
+    "openai/gpt-5.2-pro",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-opus-4.5",
+    "x-ai/grok-code-fast-1",
     "x-ai/grok-4",
 ]
 
