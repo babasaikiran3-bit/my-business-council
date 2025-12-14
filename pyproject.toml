@@ -1,7 +1,7 @@
 [project]
-name = "llm-council"
+name = "eternal-copilot"
 version = "0.1.0"
-description = "Your LLM Council"
+description = "Eternal Copilot - AI-powered multi-model collaboration"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

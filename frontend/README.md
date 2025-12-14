@@ -1,6 +1,6 @@
-# LLM Council Frontend
+# Eternal Copilot Frontend
 
-React frontend for the LLM Council application, built with Vite and Tailwind CSS v4.
+React frontend for the Eternal Copilot application, built with Vite and Tailwind CSS v4.
 
 ## Tech Stack
 

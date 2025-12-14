@@ -1,4 +1,4 @@
-"""FastAPI backend for LLM Council - Vercel Serverless Function."""
+"""FastAPI backend for Eternal Copilot - Vercel Serverless Function."""
 
 import os
 import sys
@@ -17,8 +17,8 @@ import asyncio
 
 # Import backend modules
 from backend import storage
-from backend.council import (
-    run_full_council,
+from backend.copilot import (
+    run_full_copilot,
     generate_conversation_title,
     stage1_collect_responses,
     stage2_collect_rankings,
@@ -27,7 +27,7 @@ from backend.council import (
     improve_user_prompt
 )
 
-app = FastAPI(title="LLM Council API")
+app = FastAPI(title="Eternal Copilot API")
 
 # Get allowed origins from environment variable or use defaults
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
@@ -88,13 +88,13 @@ class Conversation(BaseModel):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "service": "LLM Council API"}
+    return {"status": "ok", "service": "Eternal Copilot API"}
 
 
 @app.get("/api")
 async def api_root():
     """API root endpoint."""
-    return {"status": "ok", "service": "LLM Council API"}
+    return {"status": "ok", "service": "Eternal Copilot API"}
 
 
 @app.post("/api/improve-prompt")
@@ -130,7 +130,7 @@ async def get_conversation(conversation_id: str):
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and run the 3-stage council process.
+    Send a message and run the 3-stage copilot process.
     Returns the complete response with all stages.
     """
     # Check if conversation exists
@@ -149,8 +149,8 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+    # Run the 3-stage copilot process
+    stage1_results, stage2_results, stage3_result, metadata = await run_full_copilot(
         request.content
     )
 
@@ -174,7 +174,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and stream the 3-stage council process.
+    Send a message and stream the 3-stage copilot process.
     Returns Server-Sent Events as each stage completes.
     """
     # Check if conversation exists

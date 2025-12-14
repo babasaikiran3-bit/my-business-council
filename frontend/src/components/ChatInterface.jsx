@@ -74,7 +74,7 @@ export default function ChatInterface({
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center">
-          <h2 className="text-2xl font-semibold text-foreground mb-2">Welcome to LLM Council</h2>
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Welcome to Eternal Copilot</h2>
           <p className="text-muted-foreground">Create a new conversation to get started</p>
         </div>
       </div>
@@ -88,7 +88,7 @@ export default function ChatInterface({
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <h2 className="text-2xl font-semibold text-foreground mb-2">Start a conversation</h2>
-              <p className="text-muted-foreground">Ask a question to consult the LLM Council</p>
+              <p className="text-muted-foreground">Ask a question to consult Eternal Copilot</p>
             </div>
           </div>
         ) : (
@@ -111,7 +111,7 @@ export default function ChatInterface({
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <Users className="h-4 w-4" />
-                      LLM Council
+                      Eternal Copilot
                     </div>
 
                     {msg.loading?.stage1 && Object.keys(modelStatuses).length > 0 && (

@@ -89,6 +89,19 @@ function App() {
     setModelTimings({});
   };
 
+  // Helper to mark a stage as completed
+  // Updates ref synchronously to prevent timer race condition, then updates state
+  const markStageCompleted = (stage) => {
+    latestStageTimingsRef.current = {
+      ...latestStageTimingsRef.current,
+      [stage]: { ...latestStageTimingsRef.current[stage], completed: true },
+    };
+    setStageTimings((prev) => ({
+      ...prev,
+      [stage]: { ...prev[stage], completed: true },
+    }));
+  };
+
   const loadConversations = async () => {
     try {
       const convs = await api.listConversations();
@@ -201,11 +214,8 @@ function App() {
             break;
 
           case 'stage1_complete':
-            // Mark stage 1 as completed
-            setStageTimings((prev) => ({
-              ...prev,
-              stage1: { ...prev.stage1, completed: true },
-            }));
+            // Mark stage 1 as completed (updates ref synchronously to prevent timer race condition)
+            markStageCompleted('stage1');
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
@@ -236,11 +246,8 @@ function App() {
             break;
 
           case 'stage2_complete':
-            // Mark stage 2 as completed
-            setStageTimings((prev) => ({
-              ...prev,
-              stage2: { ...prev.stage2, completed: true },
-            }));
+            // Mark stage 2 as completed (updates ref synchronously to prevent timer race condition)
+            markStageCompleted('stage2');
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
@@ -272,11 +279,8 @@ function App() {
             break;
 
           case 'stage3_complete':
-            // Mark stage 3 as completed
-            setStageTimings((prev) => ({
-              ...prev,
-              stage3: { ...prev.stage3, completed: true },
-            }));
+            // Mark stage 3 as completed (updates ref synchronously to prevent timer race condition)
+            markStageCompleted('stage3');
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];

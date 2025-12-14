@@ -1,4 +1,4 @@
-"""FastAPI backend for LLM Council."""
+"""FastAPI backend for Eternal Copilot."""
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +10,8 @@ import json
 import asyncio
 
 from . import storage
-from .council import (
-    run_full_council,
+from .copilot import (
+    run_full_copilot,
     generate_conversation_title,
     stage1_collect_responses,
     stage1_collect_responses_with_progress,
@@ -19,10 +19,10 @@ from .council import (
     stage3_synthesize_final,
     calculate_aggregate_rankings,
     improve_user_prompt,
-    get_council_models,
+    get_copilot_models,
 )
 
-app = FastAPI(title="LLM Council API")
+app = FastAPI(title="Eternal Copilot API")
 
 # Enable CORS for local development
 app.add_middleware(
@@ -68,7 +68,7 @@ class Conversation(BaseModel):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "service": "LLM Council API"}
+    return {"status": "ok", "service": "Eternal Copilot API"}
 
 
 @app.post("/api/improve-prompt")
@@ -104,7 +104,7 @@ async def get_conversation(conversation_id: str):
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and run the 3-stage council process.
+    Send a message and run the 3-stage copilot process.
     Returns the complete response with all stages.
     """
     # Check if conversation exists
@@ -123,8 +123,8 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+    # Run the 3-stage copilot process
+    stage1_results, stage2_results, stage3_result, metadata = await run_full_copilot(
         request.content
     )
 
@@ -148,7 +148,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and stream the 3-stage council process.
+    Send a message and stream the 3-stage copilot process.
     Returns Server-Sent Events as each stage completes, including individual model completions.
     """
     # Check if conversation exists
@@ -159,8 +159,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    # Get the list of council models for the frontend
-    council_models = get_council_models()
+    # Get the list of copilot models for the frontend
+    copilot_models = get_copilot_models()
 
     async def event_generator():
         # Queue for model completion events during stage 1
@@ -187,7 +187,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses with individual model progress
-            yield f"data: {json.dumps({'type': 'stage1_start', 'models': council_models})}\n\n"
+            yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
 
             # Start stage1 with progress tracking
             stage1_task = asyncio.create_task(
@@ -195,7 +195,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             )
 
             # Emit model completion events as they arrive
-            models_remaining = len(council_models)
+            models_remaining = len(copilot_models)
             while models_remaining > 0:
                 event = await model_events.get()
                 yield f"data: {json.dumps(event)}\n\n"

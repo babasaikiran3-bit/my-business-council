@@ -1,20 +1,20 @@
-# LLM Council
+# Eternal Copilot
 
-![llmcouncil](header.jpg)
+![Eternal Copilot](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, etc.), you can group them into your "Eternal Copilot". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Lead Synthesizer LLM produces the final response.
 
 In a bit more detail, here is what happens when you submit a query:
 
 1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
 2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+3. **Stage 3: Final response**. The designated Lead Synthesizer of Eternal Copilot takes all of the model's responses and compiles them into a single final answer that is presented to the user.
 
 ## Features
 
 ### Prompt Improver
 
-Before sending your question to the council, you can optionally improve your prompt using the **"✨ Improve Prompt"** button. This feature:
+Before sending your question to Eternal Copilot, you can optionally improve your prompt using the **"✨ Improve Prompt"** button. This feature:
 
 - Uses a fast LLM to rewrite your prompt to be clearer, more specific, and better structured
 - Shows your original prompt below the textarea so you can compare the changes
@@ -55,11 +55,11 @@ Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purcha
 
 ### 3. Configure Models (Optional)
 
-Edit `backend/config.py` to customize the council:
+Edit `backend/config.py` to customize Eternal Copilot:
 
 ```python
-# Council members - the LLMs that answer your question
-COUNCIL_MODELS = [
+# Copilot models - the LLMs that answer your question
+COPILOT_MODELS = [
     "openai/gpt-5.2-pro",
     "google/gemini-3-pro-preview",
     "anthropic/claude-opus-4.5",
@@ -120,7 +120,7 @@ The sidebar can be resized by dragging its right edge:
 The application uses Server-Sent Events (SSE) for real-time updates:
 - See each stage complete as it happens (Stage 1 → Stage 2 → Stage 3)
 - Loading indicators show which stage is currently processing
-- No need to wait for the entire council deliberation to complete
+- No need to wait for the entire copilot deliberation to complete
 
 ### shadcn/ui Design System
 The frontend uses the shadcn/ui component library with a zinc color palette:

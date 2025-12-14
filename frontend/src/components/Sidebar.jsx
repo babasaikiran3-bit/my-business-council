@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 const SIDEBAR_MIN_WIDTH = 240;
 const SIDEBAR_MAX_WIDTH = 480;
 const SIDEBAR_DEFAULT_WIDTH = 288; // w-72
-const STORAGE_KEY = 'llm-council-sidebar-width';
+const STORAGE_KEY = 'eternal-copilot-sidebar-width';
 
 /**
  * Format a timestamp into a human-readable relative or absolute format.
@@ -131,7 +131,7 @@ export default function Sidebar({
     >
       {/* Header section with increased horizontal padding */}
       <div className="px-14 py-8 border-b space-y-8">
-        <h1 className="text-xl font-semibold text-foreground">LLM Council</h1>
+        <h1 className="text-xl font-semibold text-foreground">Eternal Copilot</h1>
         <Button className="w-full h-10" onClick={onNewConversation}>
           <PlusCircle className="h-4 w-4 mr-2" />
           New Conversation

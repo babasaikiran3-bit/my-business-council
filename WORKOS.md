@@ -1,6 +1,6 @@
 # WORKOS.md - Authentication Implementation Guide
 
-This document provides the complete implementation plan for adding WorkOS authentication with Microsoft SSO to the LLM Council application. It serves as the single source of truth for authentication alongside `CLAUDE.md`.
+This document provides the complete implementation plan for adding WorkOS authentication with Microsoft SSO to the Eternal Copilot application. It serves as the single source of truth for authentication alongside `CLAUDE.md`.
 
 ## Table of Contents
 
@@ -85,7 +85,7 @@ User types are stored in WorkOS User Management metadata alongside roles:
   "capabilities": {
     "can_create_conversations": true,
     "can_share_conversations": true,
-    "can_use_council": true,
+    "can_use_copilot": true,
     "max_conversations_per_day": null
   }
 }
@@ -141,7 +141,7 @@ class UserCapabilities:
     """Defines what a user can do based on their type."""
     can_create_conversations: bool = False
     can_share_conversations: bool = False
-    can_use_council: bool = False
+    can_use_copilot: bool = False
     can_invite_users: bool = False
     can_view_analytics: bool = False
     max_conversations_per_day: Optional[int] = None
@@ -154,7 +154,7 @@ USER_TYPE_DEFAULTS: dict[UserType, UserCapabilities] = {
     UserType.EMPLOYEE: UserCapabilities(
         can_create_conversations=True,
         can_share_conversations=True,
-        can_use_council=True,
+        can_use_copilot=True,
         can_invite_users=True,
         can_view_analytics=True,
         max_conversations_per_day=None,  # Unlimited
@@ -164,7 +164,7 @@ USER_TYPE_DEFAULTS: dict[UserType, UserCapabilities] = {
     UserType.EXTERNAL_PARTNER: UserCapabilities(
         can_create_conversations=True,  # Can create but limited
         can_share_conversations=False,  # Cannot re-share
-        can_use_council=True,
+        can_use_copilot=True,
         can_invite_users=False,
         can_view_analytics=False,
         max_conversations_per_day=10,
@@ -174,7 +174,7 @@ USER_TYPE_DEFAULTS: dict[UserType, UserCapabilities] = {
     UserType.GUEST: UserCapabilities(
         can_create_conversations=False,  # View-only
         can_share_conversations=False,
-        can_use_council=False,  # Can only view results
+        can_use_copilot=False,  # Can only view results
         can_invite_users=False,
         can_view_analytics=False,
         max_conversations_per_day=0,
@@ -184,7 +184,7 @@ USER_TYPE_DEFAULTS: dict[UserType, UserCapabilities] = {
     UserType.SERVICE_ACCOUNT: UserCapabilities(
         can_create_conversations=True,
         can_share_conversations=False,
-        can_use_council=True,
+        can_use_copilot=True,
         can_invite_users=False,
         can_view_analytics=True,
         max_conversations_per_day=1000,  # Rate limited
@@ -205,8 +205,8 @@ def get_user_capabilities(user_type: UserType, overrides: dict = None) -> UserCa
                 'can_create_conversations', defaults.can_create_conversations),
             can_share_conversations=overrides.get(
                 'can_share_conversations', defaults.can_share_conversations),
-            can_use_council=overrides.get(
-                'can_use_council', defaults.can_use_council),
+            can_use_copilot=overrides.get(
+                'can_use_copilot', defaults.can_use_copilot),
             can_invite_users=overrides.get(
                 'can_invite_users', defaults.can_invite_users),
             can_view_analytics=overrides.get(
@@ -289,7 +289,7 @@ export function AuthGuard({ children }) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">LLM Council</h2>
+          <h2 className="text-2xl font-bold mb-4">Eternal Copilot</h2>
           <p className="text-muted-foreground mb-6">Sign in to continue</p>
           <button
             onClick={() => signIn()}
@@ -463,7 +463,7 @@ The API client includes automatic token refresh and retry on 401 (Unauthorized) 
 
 ```javascript
 /**
- * API client for the LLM Council backend with WorkOS authentication.
+ * API client for the Eternal Copilot backend with WorkOS authentication.
  * Includes automatic token refresh and retry on 401 responses.
  */
 
@@ -873,10 +873,10 @@ class AuthenticatedUser:
             return self.capabilities['can_share_conversations']
         return self.user_type == "employee"
 
-    def can_use_council(self) -> bool:
-        """Check if user can submit queries to the LLM council."""
-        if self.capabilities and 'can_use_council' in self.capabilities:
-            return self.capabilities['can_use_council']
+    def can_use_copilot(self) -> bool:
+        """Check if user can submit queries to the Eternal Copilot."""
+        if self.capabilities and 'can_use_copilot' in self.capabilities:
+            return self.capabilities['can_use_copilot']
         return self.user_type in ("employee", "external_partner", "service_account")
 
 
@@ -1236,7 +1236,7 @@ def update_conversation_title(conversation_id: str, user_id: str, title: str):
 #### E. Modified API Endpoints (`backend/main.py`)
 
 ```python
-"""FastAPI backend for LLM Council with WorkOS authentication."""
+"""FastAPI backend for Eternal Copilot with WorkOS authentication."""
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -1249,8 +1249,8 @@ import asyncio
 
 from . import storage
 from .auth import get_current_user, AuthenticatedUser, require_role
-from .council import (
-    run_full_council,
+from .copilot import (
+    run_full_copilot,
     generate_conversation_title,
     stage1_collect_responses,
     stage1_collect_responses_with_progress,
@@ -1258,10 +1258,10 @@ from .council import (
     stage3_synthesize_final,
     calculate_aggregate_rankings,
     improve_user_prompt,
-    get_council_models,
+    get_copilot_models,
 )
 
-app = FastAPI(title="LLM Council API")
+app = FastAPI(title="Eternal Copilot API")
 
 # CORS configuration (unchanged)
 app.add_middleware(
@@ -1287,7 +1287,7 @@ class ImprovePromptRequest(BaseModel):
 # Health check (no auth required)
 @app.get("/")
 async def root():
-    return {"status": "ok", "service": "LLM Council API"}
+    return {"status": "ok", "service": "Eternal Copilot API"}
 
 
 # Protected endpoints
@@ -1326,7 +1326,7 @@ async def send_message(
     request: SendMessageRequest,
     user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Send a message and run the 3-stage council process."""
+    """Send a message and run the 3-stage copilot process."""
     conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -1339,7 +1339,7 @@ async def send_message(
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, user.id, title)
 
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+    stage1_results, stage2_results, stage3_result, metadata = await run_full_copilot(
         request.content
     )
 
@@ -1781,7 +1781,7 @@ User Types:
     args = parser.parse_args()
 
     print("=" * 60)
-    print("LLM Council - Conversation Migration")
+    print("Eternal Copilot - Conversation Migration")
     print("=" * 60)
 
     count = count_conversations()
@@ -1871,7 +1871,7 @@ WorkOS supports multiple authentication methods through AuthKit:
 1. Go to [Azure Portal](https://portal.azure.com)
 2. Navigate to **Azure Active Directory → App Registrations**
 3. Click **New Registration**:
-   - **Name**: "LLM Council - WorkOS"
+   - **Name**: "Eternal Copilot - WorkOS"
    - **Supported account types**: "Accounts in this organizational directory only" (single tenant)
    - **Redirect URI**:
      - Type: Web
@@ -1961,7 +1961,7 @@ export function AuthGuard({ children }) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-muted/30">
         <div className="w-full max-w-md text-center">
-          <h1 className="text-2xl font-bold mb-4">LLM Council</h1>
+          <h1 className="text-2xl font-bold mb-4">Eternal Copilot</h1>
           <p className="text-muted-foreground mb-6">
             Sign in to continue
           </p>
@@ -2541,7 +2541,7 @@ async def list_shared_with_me(
 | Role | Capabilities |
 |------|-------------|
 | **admin** | Full access, manage users, view all conversations (for support), configure system settings |
-| **user** | Create conversations, share conversations, use LLM council features |
+| **user** | Create conversations, share conversations, use Eternal Copilot features |
 | **viewer** | View shared conversations only, cannot create new ones |
 | **service** | Programmatic API access, limited to specific operations |
 
@@ -2603,7 +2603,7 @@ Detailed permission matrix by user type and role:
 | View own conversations | ✅ | ✅ | ✅ | N/A | ✅ |
 | View shared conversations | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Share conversations | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Use LLM council | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Use Eternal Copilot | ✅ | ✅ | ✅ | ❌ | ✅ |
 | View all conversations | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Manage users | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Invite users | ✅ | ✅ | ❌ | ❌ | ❌ |

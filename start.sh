@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# LLM Council - Start script
+# Eternal Copilot - Start script
 
-echo "Starting LLM Council..."
+echo "Starting Eternal Copilot..."
 echo ""
 
 # Check and install backend dependencies
@@ -45,7 +45,7 @@ FRONTEND_PID=$!
 cd ..
 
 echo ""
-echo "✓ LLM Council is running!"
+echo "✓ Eternal Copilot is running!"
 echo "  Backend:  http://localhost:8001"
 echo "  Frontend: http://localhost:5173"
 echo ""

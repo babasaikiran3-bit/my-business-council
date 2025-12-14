@@ -21,7 +21,7 @@ export default function Stage3({ finalResponse, timing }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <CardTitle className="text-sm font-medium">Stage 3: Final Council Answer</CardTitle>
+            <CardTitle className="text-sm font-medium">Stage 3: Final Copilot Answer</CardTitle>
           </div>
           {timing && timing.elapsed > 0 && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

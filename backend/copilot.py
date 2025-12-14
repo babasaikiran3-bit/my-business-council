@@ -1,13 +1,13 @@
-"""3-stage LLM Council orchestration."""
+"""3-stage Eternal Copilot orchestration."""
 
 from typing import List, Dict, Any, Tuple, Callable, Optional
 from .openrouter import query_models_parallel, query_model, query_models_parallel_with_progress
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
+from .config import COPILOT_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
 
 
-def get_council_models() -> List[str]:
-    """Return the list of council models."""
-    return COUNCIL_MODELS.copy()
+def get_copilot_models() -> List[str]:
+    """Return the list of copilot models."""
+    return COPILOT_MODELS.copy()
 
 
 async def improve_user_prompt(original_prompt: str) -> str:
@@ -41,7 +41,7 @@ Rules:
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     """
-    Stage 1: Collect individual responses from all council models.
+    Stage 1: Collect individual responses from all copilot models.
 
     Args:
         user_query: The user's question
@@ -52,7 +52,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await query_models_parallel(COPILOT_MODELS, messages)
 
     # Format results
     stage1_results = []
@@ -97,7 +97,7 @@ async def stage1_collect_responses_with_progress(
                 await on_model_complete(model, None, False, elapsed_ms)
 
     # Query all models in parallel with progress
-    await query_models_parallel_with_progress(COUNCIL_MODELS, messages, handle_model_complete)
+    await query_models_parallel_with_progress(COPILOT_MODELS, messages, handle_model_complete)
 
     return stage1_results
 
@@ -164,8 +164,8 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Get rankings from all copilot models in parallel
+    responses = await query_models_parallel(COPILOT_MODELS, messages)
 
     # Format results
     stage2_results = []
@@ -209,7 +209,7 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    chairman_prompt = f"""You are the Lead Synthesizer for Eternal Copilot. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
 
 Original Question: {user_query}
 
@@ -219,12 +219,12 @@ STAGE 1 - Individual Responses:
 STAGE 2 - Peer Rankings:
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
+Your task as Lead Synthesizer is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
 - The individual responses and their insights
 - The peer rankings and what they reveal about response quality
 - Any patterns of agreement or disagreement
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+Provide a clear, well-reasoned final answer that represents the copilot's collective wisdom:"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
@@ -363,9 +363,9 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_copilot(user_query: str) -> Tuple[List, List, Dict, Dict]:
     """
-    Run the complete 3-stage council process.
+    Run the complete 3-stage copilot process.
 
     Args:
         user_query: The user's question

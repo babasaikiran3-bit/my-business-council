@@ -1,5 +1,5 @@
 /**
- * API client for the LLM Council backend.
+ * API client for the Eternal Copilot backend.
  */
 
 // Use environment variable for API base URL, fallback to localhost for development

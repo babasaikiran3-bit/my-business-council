@@ -1,4 +1,4 @@
-"""Configuration for the LLM Council."""
+"""Configuration for Eternal Copilot."""
 
 import os
 
@@ -9,12 +9,11 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# Council members - list of OpenRouter model identifiers
-COUNCIL_MODELS = [
+# Copilot models - list of OpenRouter model identifiers
+COPILOT_MODELS = [
     "openai/gpt-5.2-pro",
     "google/gemini-3-pro-preview",
     "anthropic/claude-opus-4.5",
-    "x-ai/grok-code-fast-1",
     "x-ai/grok-4",
 ]
 

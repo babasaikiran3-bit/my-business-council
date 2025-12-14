@@ -1,10 +1,10 @@
-# CLAUDE.md - Technical Notes for LLM Council
+# CLAUDE.md - Technical Notes for Eternal Copilot
 
 This file contains technical details, architectural decisions, and important implementation notes for future development sessions.
 
 ## Project Overview
 
-LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
+Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
 
 ## Recent Changes (December 2024)
 
@@ -20,7 +20,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 ### Resizable Sidebar Feature
 - Drag the right edge to resize (min: 240px, max: 480px, default: 288px)
-- Width persists in localStorage with key `llm-council-sidebar-width`
+- Width persists in localStorage with key `eternal-copilot-sidebar-width`
 - Visual grip indicator appears on hover
 
 ### CSS Reset Fix
@@ -37,7 +37,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers) - currently 5 models:
+- Contains `COPILOT_MODELS` (list of OpenRouter model identifiers) - currently 5 models:
   - `openai/gpt-5.2-pro`
   - `google/gemini-3-pro-preview`
   - `anthropic/claude-opus-4.5`
@@ -54,9 +54,9 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Returns dict with 'content' and optional 'reasoning_details'
 - Graceful degradation: returns None on failure, continues with successful responses
 
-**`council.py`** - The Core Logic
+**`copilot.py`** - The Core Logic
 - `improve_user_prompt()`: Uses `PROMPT_IMPROVER_MODEL` to rewrite user prompts for clarity
-- `stage1_collect_responses()`: Parallel queries to all council models
+- `stage1_collect_responses()`: Parallel queries to all copilot models
 - `stage2_collect_rankings()`:
   - Anonymizes responses as "Response A, B, C, etc."
   - Creates `label_to_model` mapping for de-anonymization
@@ -67,7 +67,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
 - `generate_conversation_title()`: Uses `google/gemini-2.5-flash` for fast title generation from first message
-- `run_full_council()`: Orchestrates the complete 3-stage process
+- `run_full_copilot()`: Orchestrates the complete 3-stage process
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
@@ -101,7 +101,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`components/Sidebar.jsx`**
 - Resizable sidebar with drag-to-resize functionality
-- localStorage persistence for width (key: `llm-council-sidebar-width`)
+- localStorage persistence for width (key: `eternal-copilot-sidebar-width`)
 - Min: 240px, Max: 480px, Default: 288px
 - Uses shadcn/ui ScrollArea with padding fix (see Common Gotchas)
 - Custom horizontal padding: `px-14` for header, `px-12` for conversation list
@@ -129,7 +129,7 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Explanatory text clarifies that boldface model names are for readability only
 
 **`components/Stage3.jsx`**
-- Final synthesized answer from chairman
+- Final synthesized answer from Lead Synthesizer
 - Uses `bg-muted/30` background to highlight conclusion (shadcn/ui style)
 
 **`components/ui/*.jsx`** (shadcn/ui Components)
@@ -193,7 +193,7 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
 
 ### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+Models are hardcoded in `backend/config.py`. Chairman can be same or different from copilot models. The current default is Gemini as chairman per user preference.
 
 ## System Requirements
 
@@ -234,7 +234,7 @@ Then run `source ~/.zshrc` or restart terminal.
 
 ## Future Enhancement Ideas
 
-- Configurable council/chairman via UI instead of config file
+- Configurable copilot models/chairman via UI instead of config file
 - ~~Streaming responses instead of batch loading~~ ✅ Implemented via SSE
 - ~~Resizable sidebar~~ ✅ Implemented with localStorage persistence
 - ~~shadcn/ui component migration~~ ✅ Completed with zinc color palette
@@ -248,7 +248,7 @@ Then run `source ~/.zshrc` or restart terminal.
 
 ## Testing Notes
 
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to the copilot. The script tests both streaming and non-streaming modes.
 
 **Note:** The `test_openrouter.py` file may need to be created. You can test OpenRouter connectivity manually by running the backend and making API calls via the frontend or curl.
 
@@ -263,7 +263,7 @@ Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankin
     ↓
 Aggregate Rankings Calculation → [sorted by avg position]
     ↓
-Stage 3: Chairman synthesis with full context
+Stage 3: Lead Synthesizer synthesis with full context
     ↓
 Return: {stage1, stage2, stage3, metadata}
     ↓

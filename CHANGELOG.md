@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the LLM Council project are documented in this file.
+All notable changes to the Eternal Copilot project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -46,7 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.1.0] - 2024-12-13
 
 ### Added
-- **Server-Sent Events (SSE) Streaming**: Real-time progressive updates for council deliberation
+- **Server-Sent Events (SSE) Streaming**: Real-time progressive updates for copilot deliberation
   - See each stage complete as it happens (Stage 1 → Stage 2 → Stage 3)
   - Loading indicators show current processing stage
   - New API endpoint: `POST /api/conversations/{id}/message/stream`
@@ -64,8 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.0.0] - 2024-12-12
 
 ### Added
-- **3-Stage Council Deliberation System**:
-  - Stage 1: Parallel queries to all council LLMs
+- **3-Stage Copilot Deliberation System**:
+  - Stage 1: Parallel queries to all copilot LLMs
   - Stage 2: Anonymous peer review and ranking
   - Stage 3: Chairman synthesis of final answer
 - **Anonymized Peer Review**: Models evaluate responses without knowing which model generated them
@@ -89,5 +89,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 |---------|------|------------|
 | 1.2.0 | 2025-12-14 | Tailwind v4, shadcn/ui, resizable sidebar |
 | 1.1.0 | 2024-12-13 | SSE streaming, prompt improvement |
-| 1.0.0 | 2024-12-12 | Initial release, 3-stage council system |
+| 1.0.0 | 2024-12-12 | Initial release, 3-stage copilot system |
 
