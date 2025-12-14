@@ -77,10 +77,12 @@ PROMPT_IMPROVER_MODEL = "google/gemini-3-pro-preview"
 
 ## Running the Application
 
-**Option 1: Use the start script**
+### Option 1: Use the start script (Recommended)
 ```bash
 ./start.sh
 ```
+
+The start script will automatically check and install dependencies if they're missing, then start both servers.
 
 **Option 2: Run manually**
 
