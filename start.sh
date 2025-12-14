@@ -18,6 +18,7 @@ echo "Starting frontend on http://localhost:5173..."
 cd frontend
 npm run dev &
 FRONTEND_PID=$!
+cd ..
 
 echo ""
 echo "✓ LLM Council is running!"
