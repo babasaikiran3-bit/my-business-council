@@ -42,6 +42,8 @@ OPENROUTER_API_KEY=sk-or-v1-...
 
 Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
 
+If you want a starter template, copy `env.template` to `.env` and edit it.
+
 ### 3. Configure Models (Optional)
 
 Edit `backend/config.py` to customize the council:
@@ -62,6 +64,58 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 **Option 1: Use the start script**
 ```bash
 ./start.sh
+```
+
+**Option 1b: Docker Compose**
+
+1. Provide `OPENROUTER_API_KEY` (either via a local `.env` file or your shell environment).
+
+Create a `.env` file in the project root (optional but recommended):
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+If you want a starter template, copy `env.template` to `.env` and edit it.
+
+2. Build + run:
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:5173 in your browser.
+
+Notes:
+- Data is persisted on the host at `./data/` (mounted into the backend container).
+- If you’re not accessing the app from the same machine (i.e. not `localhost`), set `VITE_API_BASE` to the correct reachable backend URL (e.g. `http://YOUR_HOST:8001`) in `docker-compose.yml` or your environment.
+
+**Podman (podman-compose)**
+
+If you're using Podman instead of Docker, you can run the same `docker-compose.yml` with `podman-compose`.
+
+- Detached mode (recommended):
+
+```bash
+podman-compose down && podman-compose build --no-cache && podman-compose up -d
+```
+
+- Foreground mode:
+
+```bash
+podman-compose down && podman-compose build --no-cache && podman-compose up
+```
+
+- Tail logs:
+
+```bash
+podman-compose logs -f
+```
+
+- Stop:
+
+```bash
+podman-compose down
 ```
 
 **Option 2: Run manually**
