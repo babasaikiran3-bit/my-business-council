@@ -1,0 +1,56 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "9001:9001"
+    volumes:
+      # Mount entire project for relative imports and hot reload
+      - .:/app
+      # Named volume for conversation data persistence
+      - conversations-data:/app/data
+    environment:
+      # Load API key from .env file
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    networks:
+      - llmcouncil-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount frontend source code for hot reload
+      - ./frontend:/app
+      # Anonymous volume to prevent node_modules from being overwritten by host
+      - /app/node_modules
+    networks:
+      - llmcouncil-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    ports:
+      - "9000:9000"
+    networks:
+      - llmcouncil-network
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+networks:
+  llmcouncil-network:
+    driver: bridge
+
+volumes:
+  conversations-data:
+    driver: local
