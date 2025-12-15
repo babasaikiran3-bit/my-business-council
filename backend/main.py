@@ -11,6 +11,7 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .customer_request import CustomerRequest, process_customer_request
 
 app = FastAPI(title="LLM Council API")
 
@@ -48,6 +49,23 @@ class Conversation(BaseModel):
     created_at: str
     title: str
     messages: List[Dict[str, Any]]
+
+
+@app.post("/api/customer-request")
+async def submit_customer_request(request: CustomerRequest):
+    """
+    Submit a customer feature request or bug report.
+    
+    This endpoint:
+    1. Analyzes the request with the LLM Council
+    2. Creates a Linear issue
+    3. Sends a confirmation email to the customer
+    """
+    try:
+        result = await process_customer_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")

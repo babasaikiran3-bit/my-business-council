@@ -25,6 +25,13 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
 
+# Rube MCP Server configuration
+RUBE_MCP_URL = os.getenv("RUBE_MCP_URL", "https://rube.app/mcp")
+RUBE_API_KEY = os.getenv("RUBE_API_KEY")
+
+# Linear configuration
+LINEAR_TEAM_ID = os.getenv("LINEAR_TEAM_ID")
+
 # Composio configuration
 COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY")
 COMPOSIO_MCP_SERVER_ID = os.getenv("COMPOSIO_MCP_SERVER_ID")
