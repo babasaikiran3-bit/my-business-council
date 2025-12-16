@@ -43,15 +43,60 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### 2. Configure Environment Variables
 
-Create a `.env` file in the project root:
+This project uses **two separate `.env` files** for backend and frontend configuration. This follows the standard Vite convention where frontend variables require a `VITE_` prefix.
+
+#### Step 1: Copy the example files
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...
+# Backend configuration (project root)
+cp .env.example .env
+
+# Frontend configuration
+cp frontend/.env.example frontend/.env
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+#### Step 2: Configure the backend (`.env` in project root)
+
+```bash
+# Required: OpenRouter API Key for LLM queries
+# Get your API key at https://openrouter.ai/
+OPENROUTER_API_KEY=sk-or-v1-...
+
+# Required for production: WorkOS Authentication
+# Get these from https://dashboard.workos.com
+WORKOS_API_KEY=sk_xxxxx
+WORKOS_CLIENT_ID=client_xxxxx
+
+# Optional: Email domain validation (defaults to eternal.ag)
+EMPLOYEE_EMAIL_DOMAIN=eternal.ag
+```
+
+#### Step 3: Configure the frontend (`frontend/.env`)
+
+```bash
+# Required: WorkOS Client ID (MUST match WORKOS_CLIENT_ID from backend .env)
+VITE_WORKOS_CLIENT_ID=client_xxxxx
+
+# Required: OAuth callback URL
+# Development: http://localhost:5173/callback
+# Production: https://your-domain.com/callback
+VITE_WORKOS_REDIRECT_URI=http://localhost:5173/callback
+```
+
+> **Important:** `WORKOS_CLIENT_ID` must be set in BOTH files. The backend uses `WORKOS_CLIENT_ID` and the frontend uses `VITE_WORKOS_CLIENT_ID` with the same value. This duplication is required because Vite only exposes variables with the `VITE_` prefix to browser code.
+
+#### Why Two Files?
+
+| Aspect | Backend (`.env`) | Frontend (`frontend/.env`) |
+|--------|------------------|---------------------------|
+| **Runtime** | Python server | Browser (JavaScript) |
+| **Security** | Server-side secrets OK | Public (bundled into JS) |
+| **Access** | `os.getenv()` | `import.meta.env.VITE_*` |
+| **Prefix** | Any name | Must start with `VITE_` |
+
+Variables like `OPENROUTER_API_KEY` and `WORKOS_API_KEY` are **never exposed** to the browser. Only `VITE_` prefixed variables are bundled into the frontend JavaScript.
 
 ### 3. Configure Models (Optional)
 
@@ -229,6 +274,28 @@ Kill the conflicting process or modify the port in `backend/main.py`.
   {/* content */}
 </ScrollArea>
 ```
+
+### Authentication "Configuration Error" screen
+
+**Problem:** Frontend shows a "Configuration Error" screen with "Authentication not configured" message.
+
+**Cause:** The `VITE_WORKOS_CLIENT_ID` environment variable is missing from `frontend/.env`.
+
+**Solution:**
+1. Copy the frontend environment file: `cp frontend/.env.example frontend/.env`
+2. Set `VITE_WORKOS_CLIENT_ID` to your WorkOS Client ID (must match `WORKOS_CLIENT_ID` in root `.env`)
+3. Restart the frontend development server
+
+### Backend returns 500 "Server authentication not configured"
+
+**Problem:** API calls return HTTP 500 with "Server authentication not configured" message.
+
+**Cause:** WorkOS credentials are missing from the root `.env` file.
+
+**Solution:**
+1. Copy the root environment file: `cp .env.example .env`
+2. Set `WORKOS_API_KEY` and `WORKOS_CLIENT_ID` from your WorkOS dashboard
+3. Restart the backend server
 
 ## Development Notes
 

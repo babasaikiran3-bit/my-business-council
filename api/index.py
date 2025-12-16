@@ -6,7 +6,7 @@ import sys
 # Add the project root to the path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ import asyncio
 
 # Import backend modules
 from backend import storage
+from backend.auth import AuthenticatedUser, get_current_user
 from backend.copilot import (
     run_full_copilot,
     generate_conversation_title,
@@ -98,43 +99,53 @@ async def api_root():
 
 
 @app.post("/api/improve-prompt")
-async def improve_prompt(request: ImprovePromptRequest):
+async def improve_prompt(
+    request: ImprovePromptRequest,
+    user: AuthenticatedUser = Depends(get_current_user)  # noqa: ARG001
+):
     """Improve a user's prompt using an LLM."""
     improved = await improve_user_prompt(request.content)
     return {"improved_prompt": improved}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
+async def list_conversations(user: AuthenticatedUser = Depends(get_current_user)):
+    """List all conversations for the authenticated user (metadata only)."""
+    return storage.list_conversations(user_id=user.id)
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
-    """Create a new conversation."""
+async def create_conversation(user: AuthenticatedUser = Depends(get_current_user)):
+    """Create a new conversation for the authenticated user."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    conversation = storage.create_conversation(conversation_id, user_id=user.id)
     return conversation
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(
+    conversation_id: str,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """Get a specific conversation with all its messages."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
+async def send_message(
+    conversation_id: str,
+    request: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Send a message and run the 3-stage copilot process.
     Returns the complete response with all stages.
     """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    # Check if conversation exists (scoped to user)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -142,12 +153,12 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    storage.add_user_message(conversation_id, user_id=user.id, content=request.content)
 
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
-        storage.update_conversation_title(conversation_id, title)
+        storage.update_conversation_title(conversation_id, user_id=user.id, title=title)
 
     # Run the 3-stage copilot process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_copilot(
@@ -157,9 +168,10 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Add assistant message with all stages
     storage.add_assistant_message(
         conversation_id,
-        stage1_results,
-        stage2_results,
-        stage3_result
+        user_id=user.id,
+        stage1=stage1_results,
+        stage2=stage2_results,
+        stage3=stage3_result
     )
 
     # Return the complete response with metadata
@@ -172,23 +184,30 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(
+    conversation_id: str,
+    request: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Send a message and stream the 3-stage copilot process.
     Returns Server-Sent Events as each stage completes.
     """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    # Check if conversation exists (scoped to user)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Capture user_id for use in the generator closure
+    user_id = user.id
+
     async def event_generator():
         try:
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            storage.add_user_message(conversation_id, user_id=user_id, content=request.content)
 
             # Start title generation in parallel (don't await yet)
             title_task = None
@@ -214,15 +233,16 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
-                storage.update_conversation_title(conversation_id, title)
+                storage.update_conversation_title(conversation_id, user_id=user_id, title=title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
             # Save complete assistant message
             storage.add_assistant_message(
                 conversation_id,
-                stage1_results,
-                stage2_results,
-                stage3_result
+                user_id=user_id,
+                stage1=stage1_results,
+                stage2=stage2_results,
+                stage3=stage3_result
             )
 
             # Send completion event

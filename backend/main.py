@@ -1,6 +1,7 @@
 """FastAPI backend for Eternal Copilot."""
 
-from fastapi import FastAPI, HTTPException
+import logging
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ import json
 import asyncio
 
 from . import storage
+from .auth import AuthenticatedUser, get_current_user
+from .config import WORKOS_API_KEY, WORKOS_CLIENT_ID, ALLOWED_ORIGINS
 from .copilot import (
     run_full_copilot,
     generate_conversation_title,
@@ -22,12 +25,27 @@ from .copilot import (
     get_copilot_models,
 )
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Eternal Copilot API")
 
-# Enable CORS for local development
+# Check WorkOS configuration on startup
+if not WORKOS_API_KEY or not WORKOS_CLIENT_ID:
+    logger.critical(
+        "CRITICAL: WorkOS credentials not configured. "
+        "Set WORKOS_API_KEY and WORKOS_CLIENT_ID environment variables. "
+        "All authenticated endpoints will return 500 errors until configured."
+    )
+    print(
+        "\n⚠️  WARNING: WorkOS authentication is NOT configured!\n"
+        "   Set WORKOS_API_KEY and WORKOS_CLIENT_ID in your .env file.\n"
+        "   All API endpoints requiring authentication will return 500 errors.\n"
+    )
+
+# Enable CORS - uses ALLOWED_ORIGINS from config (defaults to localhost for development)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,43 +90,53 @@ async def root():
 
 
 @app.post("/api/improve-prompt")
-async def improve_prompt(request: ImprovePromptRequest):
+async def improve_prompt(
+    request: ImprovePromptRequest,
+    user: AuthenticatedUser = Depends(get_current_user)  # noqa: ARG001
+):
     """Improve a user's prompt using an LLM."""
     improved = await improve_user_prompt(request.content)
     return {"improved_prompt": improved}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
+async def list_conversations(user: AuthenticatedUser = Depends(get_current_user)):
+    """List all conversations for the authenticated user (metadata only)."""
+    return storage.list_conversations(user_id=user.id)
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
-    """Create a new conversation."""
+async def create_conversation(user: AuthenticatedUser = Depends(get_current_user)):
+    """Create a new conversation for the authenticated user."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    conversation = storage.create_conversation(conversation_id, user_id=user.id)
     return conversation
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(
+    conversation_id: str,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """Get a specific conversation with all its messages."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
+async def send_message(
+    conversation_id: str,
+    request: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Send a message and run the 3-stage copilot process.
     Returns the complete response with all stages.
     """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    # Check if conversation exists (scoped to user)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -116,12 +144,12 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    storage.add_user_message(conversation_id, user_id=user.id, content=request.content)
 
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
-        storage.update_conversation_title(conversation_id, title)
+        storage.update_conversation_title(conversation_id, user_id=user.id, title=title)
 
     # Run the 3-stage copilot process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_copilot(
@@ -131,9 +159,10 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Add assistant message with all stages
     storage.add_assistant_message(
         conversation_id,
-        stage1_results,
-        stage2_results,
-        stage3_result
+        user_id=user.id,
+        stage1=stage1_results,
+        stage2=stage2_results,
+        stage3=stage3_result
     )
 
     # Return the complete response with metadata
@@ -146,13 +175,17 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(
+    conversation_id: str,
+    request: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
     """
     Send a message and stream the 3-stage copilot process.
     Returns Server-Sent Events as each stage completes, including individual model completions.
     """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    # Check if conversation exists (scoped to user)
+    conversation = storage.get_conversation(conversation_id, user_id=user.id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -161,6 +194,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
     # Get the list of copilot models for the frontend
     copilot_models = get_copilot_models()
+
+    # Capture user_id for use in the generator closure
+    user_id = user.id
 
     async def event_generator():
         # Queue for model completion events during stage 1
@@ -179,7 +215,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
         try:
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            storage.add_user_message(conversation_id, user_id=user_id, content=request.content)
 
             # Start title generation in parallel (don't await yet)
             title_task = None
@@ -219,15 +255,16 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
-                storage.update_conversation_title(conversation_id, title)
+                storage.update_conversation_title(conversation_id, user_id=user_id, title=title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
             # Save complete assistant message
             storage.add_assistant_message(
                 conversation_id,
-                stage1_results,
-                stage2_results,
-                stage3_result
+                user_id=user_id,
+                stage1=stage1_results,
+                stage2=stage2_results,
+                stage3=stage3_result
             )
 
             # Send completion event

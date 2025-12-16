@@ -79,7 +79,7 @@ User types are stored in WorkOS User Management metadata alongside roles:
 {
   "user_type": "employee",
   "role": "user",
-  "organization_id": "org_xxxxx",
+  "organization_id": "org_eternal",
   "department": "Engineering",
   "provisioned_via": "microsoft_oauth",
   "capabilities": {
@@ -105,7 +105,7 @@ User types are stored in WorkOS User Management metadata alongside roles:
 │  │  Check Authentication Provider (from WorkOS authentication_method)  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │       │                                                                    │
-│       ├── MicrosoftOAuth + email @yourcompany.com ──► user_type=employee   │
+│       ├── MicrosoftOAuth + email @eternal.ag ──► user_type=employee        │
 │       │                                                                    │
 │       ├── GoogleOAuth/Password ──► Check invite/allow-list                 │
 │       │       │                                                            │
@@ -975,7 +975,7 @@ def detect_user_type_from_user(user_info: dict, auth_method: Optional[str]) -> s
     import os
     metadata = user_info.get("metadata", {})
 
-    EMPLOYEE_EMAIL_DOMAIN = os.getenv("EMPLOYEE_EMAIL_DOMAIN", "yourcompany.com")
+    EMPLOYEE_EMAIL_DOMAIN = os.getenv("EMPLOYEE_EMAIL_DOMAIN", "eternal.ag")
 
     # 1. Check for explicit user_type
     if "user_type" in metadata:
@@ -1540,6 +1540,15 @@ CREATE TABLE organization_members (
 );
 
 CREATE INDEX idx_org_members_user ON organization_members(user_id);
+
+-- Create Eternal as Tenant #1 (initial organization)
+INSERT INTO organizations (id, name, slug, settings)
+VALUES (
+    'org_eternal',
+    'Eternal',
+    'eternal',
+    '{"employee_email_domain": "eternal.ag"}'::jsonb
+);
 ```
 
 ### 3.6 Row Level Security (RLS) Policies
@@ -1903,7 +1912,7 @@ WorkOS supports multiple authentication methods through AuthKit:
 2. Click **Create Connection**
 3. Select **Microsoft Azure AD**
 4. Configure:
-   - **Connection Name**: "Your Company SSO"
+   - **Connection Name**: "Eternal SSO"
    - **Client ID**: Application (client) ID from Azure
    - **Client Secret**: Secret value from Azure
    - **Azure Tenant ID**: Your directory (tenant) ID
@@ -2081,15 +2090,15 @@ WORKOS_API_KEY=sk_test_xxxxx
 WORKOS_CLIENT_ID=client_xxxxx
 
 # User Type Configuration
-EMPLOYEE_EMAIL_DOMAIN=yourcompany.com
-ALLOWED_PARTNER_DOMAINS=partner1.com,partner2.com
+EMPLOYEE_EMAIL_DOMAIN=eternal.ag
+# ALLOWED_PARTNER_DOMAINS=partner1.com,partner2.com  # Add partner domains as needed
 ```
 
 **Frontend `.env`**:
 ```env
 VITE_WORKOS_CLIENT_ID=client_xxxxx
 VITE_WORKOS_REDIRECT_URI=http://localhost:5173/callback
-VITE_EMPLOYEE_EMAIL_DOMAIN=yourcompany.com
+VITE_EMPLOYEE_EMAIL_DOMAIN=eternal.ag
 ```
 
 **Production (Vercel)**:
@@ -2126,7 +2135,7 @@ import hashlib
 
 router = APIRouter()
 
-EMPLOYEE_EMAIL_DOMAIN = os.getenv("EMPLOYEE_EMAIL_DOMAIN", "yourcompany.com")
+EMPLOYEE_EMAIL_DOMAIN = os.getenv("EMPLOYEE_EMAIL_DOMAIN", "eternal.ag")
 ALLOWED_PARTNER_DOMAINS = os.getenv("ALLOWED_PARTNER_DOMAINS", "").split(",")
 
 # Webhook secret is REQUIRED - use a known development value for local testing
@@ -2729,7 +2738,7 @@ async def workos_webhook(request: Request):
         email = user_data.get("email", "")
 
         # Auto-assign roles based on email domain
-        if email.endswith("@yourcompany.com"):
+        if email.endswith("@eternal.ag"):
             await set_user_role(user_id, "user")
         else:
             await set_user_role(user_id, "viewer")
@@ -3290,7 +3299,7 @@ def log_audit_event(
 ```env
 VITE_WORKOS_CLIENT_ID=client_xxxxx
 VITE_WORKOS_REDIRECT_URI=http://localhost:5173/callback
-VITE_EMPLOYEE_EMAIL_DOMAIN=yourcompany.com
+VITE_EMPLOYEE_EMAIL_DOMAIN=eternal.ag
 ```
 
 **Backend (`.env` / Vercel)**:
@@ -3303,8 +3312,8 @@ WORKOS_API_KEY=sk_test_xxxxx
 WORKOS_CLIENT_ID=client_xxxxx
 
 # User Type Configuration
-EMPLOYEE_EMAIL_DOMAIN=yourcompany.com
-ALLOWED_PARTNER_DOMAINS=partner1.com,partner2.com
+EMPLOYEE_EMAIL_DOMAIN=eternal.ag
+# ALLOWED_PARTNER_DOMAINS=partner1.com,partner2.com  # Add partner domains as needed
 
 # Optional - Webhooks
 WORKOS_WEBHOOK_SECRET=xxxxx

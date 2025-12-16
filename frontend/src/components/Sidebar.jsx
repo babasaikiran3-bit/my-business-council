@@ -68,6 +68,7 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  userMenu,
 }) {
   const [width, setWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -185,6 +186,9 @@ export default function Sidebar({
           )}
         </div>
       </ScrollArea>
+
+      {/* User menu at the bottom */}
+      {userMenu}
 
       {/* Resize handle */}
       <div

@@ -1,9 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
+import { Routes, Route } from 'react-router-dom';
+import { useAuth } from '@workos-inc/authkit-react';
+import { AuthGuard } from './components/AuthGuard';
+import { Callback } from './components/Callback';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import UserMenu from './components/UserMenu';
 import { api } from './api';
 
 function App() {
+  return (
+    <Routes>
+      {/* OAuth callback route - must be outside AuthGuard */}
+      <Route path="/callback" element={<Callback />} />
+
+      {/* All other routes require authentication */}
+      <Route path="/*" element={
+        <AuthGuard>
+          <AuthenticatedApp />
+        </AuthGuard>
+      } />
+    </Routes>
+  );
+}
+
+function AuthenticatedApp() {
+  const { getAccessToken } = useAuth();
+
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
@@ -32,6 +55,11 @@ function App() {
   const hasActiveStage = Object.values(stageTimings).some(
     (timing) => timing.startTime && !timing.completed
   );
+
+  // Set auth token getter for API calls
+  useEffect(() => {
+    api.setTokenGetter(getAccessToken);
+  }, [getAccessToken]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -123,10 +151,14 @@ function App() {
   const handleNewConversation = async () => {
     try {
       const newConv = await api.createConversation();
-      setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
-        ...conversations,
+      // Use functional update to avoid stale closure issue with conversations
+      setConversations((prev) => [
+        { id: newConv.id, created_at: newConv.created_at, title: newConv.title, message_count: 0 },
+        ...prev,
       ]);
+      // Set the conversation directly from the create response
+      // This is more efficient than relying on a separate fetch via useEffect
+      setCurrentConversation(newConv);
       setCurrentConversationId(newConv.id);
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -331,6 +363,7 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        userMenu={<UserMenu />}
       />
       <ChatInterface
         conversation={currentConversation}

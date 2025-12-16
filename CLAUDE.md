@@ -32,6 +32,27 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 - Padding must be applied to an **inner wrapper div**, NOT the ScrollArea root
 - Radix ScrollArea wraps content in a Viewport that doesn't inherit root padding
 
+### WorkOS AuthKit Authentication (Phase 1)
+- **Provider**: WorkOS AuthKit with Microsoft OAuth (SSO)
+- **Email Domain Validation**: Only `@eternal.ag` emails allowed (403 for others)
+- **Token Caching**: 45-second TTL cache using `cachetools.TTLCache` to reduce WorkOS API calls
+- **User-Scoped Storage**: Conversations stored in `data/users/{user_id}/conversations/`
+- **Frontend Components**:
+  - `AuthGuard.jsx` - Protects routes, shows sign-in screen
+  - `Callback.jsx` - Handles OAuth callback at `/callback` route (auto-handled by AuthKitProvider)
+  - `UserMenu.jsx` - Displays user info and sign-out button
+- **API Client**: `frontend/src/api.js` includes `setTokenGetter()` and automatic 401 retry with token refresh
+- **Session Configuration** (configured in WorkOS Dashboard → Authentication):
+  - Maximum session length: 7 days (168 hours)
+  - Inactivity timeout: 7 days
+  - Access token duration: 5-15 minutes (short for security, auto-refreshed by SDK)
+  - `refreshBufferInterval: 60` in AuthKitProvider ensures tokens refresh 60s before expiry
+- **Session Invalidation Scenarios**:
+  1. User explicitly clicks "Sign Out"
+  2. Security exceptions (token revocation, password change, account lockout)
+  3. Session timeout after 7 days (max length) or inactivity timeout
+- **Sign-out Redirect**: Must be configured in WorkOS Dashboard → Redirects → Sign-out redirects
+
 ## Architecture
 
 ### Backend Structure (`backend/`)
@@ -69,8 +90,16 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 - `generate_conversation_title()`: Uses `google/gemini-2.5-flash` for fast title generation from first message
 - `run_full_copilot()`: Orchestrates the complete 3-stage process
 
+**`auth.py`** (NEW - WorkOS Authentication)
+- `AuthenticatedUser` dataclass with `id`, `email`, `first_name`, `last_name`
+- `validate_email_domain()`: Enforces `@eternal.ag` emails (raises 403 for others)
+- `verify_workos_token()`: Verifies tokens with WorkOS API, uses 45s TTL cache with asyncio lock
+- `get_current_user()`: FastAPI dependency for protected endpoints (returns `AuthenticatedUser`)
+- `get_workos_client()`: Singleton pattern for WorkOS client initialization
+
 **`storage.py`**
-- JSON-based conversation storage in `data/conversations/`
+- JSON-based conversation storage in `data/users/{user_id}/conversations/`
+- All functions require `user_id` parameter to scope data by authenticated user
 - Each conversation: `{id, created_at, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
@@ -98,6 +127,29 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 - Main orchestration: manages conversations list and current conversation
 - Handles message sending and metadata storage
 - Important: metadata is stored in the UI state for display but not persisted to backend JSON
+- Restructured with React Router Routes for `/callback` and protected main app
+- Added useEffect to set token getter for API calls:
+```jsx
+useEffect(() => {
+  api.setTokenGetter(getAccessToken);
+}, [getAccessToken]);
+```
+- Updated Sidebar to receive `userMenu={<UserMenu />}` prop
+
+**`components/AuthGuard.jsx`** (NEW)
+- Created component that protects routes and shows sign-in screen
+- Exports `AuthGuard` component and `useCurrentUser` hook
+- Uses shadcn/ui Card and Button components for styling
+
+**`components/Callback.jsx`** (NEW)
+- Handles OAuth redirect from WorkOS
+- Uses `handleCallback` from useAuth hook
+- Shows error state with retry option using shadcn/ui components
+
+**`components/UserMenu.jsx`** (NEW)
+- Displays current user info with avatar/initials
+- Shows sign-out button using lucide-react LogOut icon
+- Uses shadcn/ui Button component
 
 **`components/Sidebar.jsx`**
 - Resizable sidebar with drag-to-resize functionality
@@ -141,6 +193,14 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 
 **`lib/utils.js`**
 - `cn()` function - merges Tailwind classes using `clsx` and `tailwind-merge`
+
+**`api.js`**
+- API client with WorkOS authentication support
+- `setTokenGetter()` - receives token getter from WorkOS AuthKit's useAuth hook
+- `getAuthHeaders()` - gets Authorization Bearer headers with optional force refresh
+- `fetchWithRetry()` - makes fetch requests with automatic 401 retry after token refresh
+- All API methods use `fetchWithRetry()` for consistent authentication
+- SSE streaming handles 401 with token refresh before retry
 
 **Styling (`index.css`)**
 - Light mode theme with shadcn/ui zinc color palette
@@ -195,6 +255,43 @@ All ReactMarkdown components must be wrapped in `<div className="markdown-conten
 ### Model Configuration
 Models are hardcoded in `backend/config.py`. Chairman can be same or different from copilot models. The current default is Gemini as chairman per user preference.
 
+### Environment Variable Organization
+
+This project uses **two separate `.env` files** following the standard Vite convention:
+
+| File | Purpose | Variable Access |
+|------|---------|-----------------|
+| `.env` (project root) | Backend secrets | `os.getenv()` via `python-dotenv` |
+| `frontend/.env` | Frontend config | `import.meta.env.VITE_*` |
+
+**Why separate files?**
+- **Vite's `VITE_` prefix requirement**: Vite only exposes environment variables prefixed with `VITE_` to client-side code for security
+- **Different runtimes**: Backend runs in Python, frontend runs in browser
+- **Security boundary**: `OPENROUTER_API_KEY` and `WORKOS_API_KEY` must never be exposed to browser
+
+**Variables by location:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    .env (ROOT - SECRET)                      │
+│  - OPENROUTER_API_KEY    ← Never exposed to browser          │
+│  - WORKOS_API_KEY        ← Never exposed to browser          │
+│  - WORKOS_CLIENT_ID      ← Duplicated in frontend            │
+│  - EMPLOYEE_EMAIL_DOMAIN                                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│               frontend/.env (PUBLIC)                         │
+│  - VITE_WORKOS_CLIENT_ID     ← Same value as WORKOS_CLIENT_ID│
+│  - VITE_WORKOS_REDIRECT_URI  ← OAuth callback URL            │
+│  - VITE_API_BASE_URL         ← Optional API override         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Critical duplication:** `WORKOS_CLIENT_ID` must be set in BOTH files with the same value:
+- Backend: `WORKOS_CLIENT_ID=client_xxxxx`
+- Frontend: `VITE_WORKOS_CLIENT_ID=client_xxxxx`
+
 ## System Requirements
 
 ### Node.js Version Requirement
@@ -231,6 +328,8 @@ Then run `source ~/.zshrc` or restart terminal.
 8. **ScrollArea Padding Not Working**: Radix ScrollArea wraps content in a Viewport. Padding applied to ScrollArea root doesn't reach content. **Solution**: Wrap content in a `<div>` with padding inside ScrollArea.
 9. **CSS Changes Not Visible**: Always hard refresh (`Cmd+Shift+R`) after CSS changes. Vite's HMR may not clear browser cache for CSS.
 10. **No tailwind.config.js**: This is intentional for Tailwind CSS v4. Configuration is done via `@theme` directive in `index.css`, not JavaScript.
+11. **WorkOS Client ID Must Be in Both .env Files**: `WORKOS_CLIENT_ID` (backend) and `VITE_WORKOS_CLIENT_ID` (frontend) must have the same value. If only one is set, either backend token validation or frontend OAuth will fail.
+12. **Authentication Configuration Error Screen**: If frontend shows "Configuration Error", ensure `VITE_WORKOS_CLIENT_ID` is set in `frontend/.env`. If backend returns 500, ensure `WORKOS_API_KEY` and `WORKOS_CLIENT_ID` are set in root `.env`.
 
 ## Future Enhancement Ideas
 
@@ -238,6 +337,7 @@ Then run `source ~/.zshrc` or restart terminal.
 - ~~Streaming responses instead of batch loading~~ ✅ Implemented via SSE
 - ~~Resizable sidebar~~ ✅ Implemented with localStorage persistence
 - ~~shadcn/ui component migration~~ ✅ Completed with zinc color palette
+- ~~WorkOS AuthKit authentication~~ ✅ Implemented Phase 1 (Microsoft SSO, email domain validation)
 - Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
@@ -245,6 +345,8 @@ Then run `source ~/.zshrc` or restart terminal.
 - Dark mode toggle (theme infrastructure is in place via CSS variables)
 - Keyboard shortcuts for common actions (new conversation, toggle sidebar)
 - Search/filter conversations in sidebar
+- Multi-tenant support (Phase 2+: organization-based conversation sharing)
+- RBAC for team permissions
 
 ## Testing Notes
 

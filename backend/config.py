@@ -9,6 +9,24 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# WorkOS Authentication Configuration
+WORKOS_API_KEY = os.getenv("WORKOS_API_KEY")
+WORKOS_CLIENT_ID = os.getenv("WORKOS_CLIENT_ID")
+EMPLOYEE_EMAIL_DOMAIN = os.getenv("EMPLOYEE_EMAIL_DOMAIN", "eternal.ag")
+ALLOWED_PARTNER_DOMAINS = os.getenv("ALLOWED_PARTNER_DOMAINS", "").split(",")
+ALLOWED_PARTNER_DOMAINS = [d.strip() for d in ALLOWED_PARTNER_DOMAINS if d.strip()]
+
+# Token cache TTL in seconds (45 seconds as per WORKOS.md)
+TOKEN_CACHE_TTL = 45
+
+# CORS allowed origins - comma-separated list
+# Defaults to localhost:5173 and localhost:3000 for development
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if _allowed_origins_env:
+    ALLOWED_ORIGINS = [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+else:
+    ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+
 # Copilot models - list of OpenRouter model identifiers
 COPILOT_MODELS = [
     "openai/gpt-5.2-pro",
