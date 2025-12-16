@@ -372,34 +372,46 @@ async def run_full_copilot(user_query: str) -> Tuple[List, List, Dict, Dict]:
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
+        metadata includes label_to_model, aggregate_rankings, and timing info
     """
+    import time
+
     # Stage 1: Collect individual responses
+    stage1_start = time.time()
     stage1_results = await stage1_collect_responses(user_query)
+    stage1_duration_ms = int((time.time() - stage1_start) * 1000)
 
     # If no models responded successfully, return error
     if not stage1_results:
         return [], [], {
             "model": "error",
             "response": "All models failed to respond. Please try again."
-        }, {}
+        }, {"stage1_duration_ms": stage1_duration_ms}
 
     # Stage 2: Collect rankings
+    stage2_start = time.time()
     stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_duration_ms = int((time.time() - stage2_start) * 1000)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
+    stage3_start = time.time()
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
         stage2_results
     )
+    stage3_duration_ms = int((time.time() - stage3_start) * 1000)
 
-    # Prepare metadata
+    # Prepare metadata with timing
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "stage1_duration_ms": stage1_duration_ms,
+        "stage2_duration_ms": stage2_duration_ms,
+        "stage3_duration_ms": stage3_duration_ms,
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

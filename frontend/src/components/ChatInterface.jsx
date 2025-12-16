@@ -36,7 +36,8 @@ export default function ChatInterface({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (input.trim() && !isLoading && !isImproving) {
-      onSendMessage(input);
+      // Pass originalPrompt if the prompt was improved
+      onSendMessage(input, originalPrompt);
       setInput('');
       setOriginalPrompt(null);
     }

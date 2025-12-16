@@ -169,7 +169,7 @@ function AuthenticatedApp() {
     setCurrentConversationId(id);
   };
 
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, originalQuery = null) => {
     if (!currentConversationId) return;
 
     setIsLoading(true);
@@ -204,7 +204,7 @@ function AuthenticatedApp() {
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming
+      // Send message with streaming (pass originalQuery if prompt was improved)
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
@@ -344,7 +344,7 @@ function AuthenticatedApp() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, originalQuery);
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error

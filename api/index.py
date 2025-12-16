@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 
 # Add the project root to the path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,6 +15,9 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import backend modules
 from backend import storage
@@ -155,6 +159,12 @@ async def send_message(
     # Add user message
     storage.add_user_message(conversation_id, user_id=user.id, content=request.content)
 
+    # Store the original query for first message
+    if is_first_message:
+        storage.update_conversation_queries(
+            conversation_id, user_id=user.id, original_query=request.content
+        )
+
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
@@ -165,13 +175,20 @@ async def send_message(
         request.content
     )
 
-    # Add assistant message with all stages
+    # Add assistant message with all stages and timing
     storage.add_assistant_message(
         conversation_id,
         user_id=user.id,
         stage1=stage1_results,
         stage2=stage2_results,
-        stage3=stage3_result
+        stage3=stage3_result,
+        stage1_duration_ms=metadata.get("stage1_duration_ms"),
+        stage2_duration_ms=metadata.get("stage2_duration_ms"),
+        stage3_duration_ms=metadata.get("stage3_duration_ms"),
+        metadata={
+            "label_to_model": metadata.get("label_to_model"),
+            "aggregate_rankings": metadata.get("aggregate_rankings"),
+        },
     )
 
     # Return the complete response with metadata
@@ -205,30 +222,47 @@ async def send_message_stream(
     user_id = user.id
 
     async def event_generator():
+        # Track timing for each stage
+        stage1_duration_ms = 0
+        stage2_duration_ms = 0
+        stage3_duration_ms = 0
+        title_task = None
+
         try:
             # Add user message
             storage.add_user_message(conversation_id, user_id=user_id, content=request.content)
 
+            # Store the original query for first message
+            if is_first_message:
+                storage.update_conversation_queries(
+                    conversation_id, user_id=user_id, original_query=request.content
+                )
+
             # Start title generation in parallel (don't await yet)
-            title_task = None
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+            stage1_start = time.time()
             stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+            stage2_start = time.time()
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+            stage3_start = time.time()
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+            stage3_duration_ms = int((time.time() - stage3_start) * 1000)
+            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'duration_ms': stage3_duration_ms})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:
@@ -236,17 +270,25 @@ async def send_message_stream(
                 storage.update_conversation_title(conversation_id, user_id=user_id, title=title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
+            # Save complete assistant message with timing and metadata
             storage.add_assistant_message(
                 conversation_id,
                 user_id=user_id,
                 stage1=stage1_results,
                 stage2=stage2_results,
-                stage3=stage3_result
+                stage3=stage3_result,
+                stage1_duration_ms=stage1_duration_ms,
+                stage2_duration_ms=stage2_duration_ms,
+                stage3_duration_ms=stage3_duration_ms,
+                metadata={
+                    "label_to_model": label_to_model,
+                    "aggregate_rankings": aggregate_rankings,
+                },
             )
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            # Send completion event with total timing
+            total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
+            yield f"data: {json.dumps({'type': 'complete', 'total_duration_ms': total_duration_ms})}\n\n"
 
         except Exception as e:
             # Cancel title_task if it was created and not completed to prevent task leakage
@@ -258,6 +300,7 @@ async def send_message_stream(
                     # Suppress expected cancellation exception
                     pass
             # Send error event
+            logger.exception("Error in streaming endpoint")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(

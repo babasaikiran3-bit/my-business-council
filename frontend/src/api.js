@@ -198,10 +198,15 @@ export const api = {
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
+   * @param {string|null} originalQuery - Original query before improvement (if prompt was improved)
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent) {
+  async sendMessageStream(conversationId, content, onEvent, originalQuery = null) {
     const authHeaders = await this.getAuthHeaders();
+    const body = { content };
+    if (originalQuery) {
+      body.original_query = originalQuery;
+    }
     let response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
@@ -210,7 +215,7 @@ export const api = {
           'Content-Type': 'application/json',
           ...authHeaders,
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       }
     );
 
@@ -226,7 +231,7 @@ export const api = {
             'Content-Type': 'application/json',
             ...newHeaders,
           },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify(body),
         }
       );
     }

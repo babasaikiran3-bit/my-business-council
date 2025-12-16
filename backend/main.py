@@ -1,6 +1,7 @@
 """FastAPI backend for Eternal Copilot."""
 
 import logging
+import time
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -60,6 +61,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    original_query: str | None = None  # Original user-typed query (before improvement)
 
 
 class ImprovePromptRequest(BaseModel):
@@ -146,6 +148,22 @@ async def send_message(
     # Add user message
     storage.add_user_message(conversation_id, user_id=user.id, content=request.content)
 
+    # Store the original/improved query for first message
+    if is_first_message:
+        if request.original_query:
+            # User improved the prompt: original_query has the original, content has improved
+            storage.update_conversation_queries(
+                conversation_id,
+                user_id=user.id,
+                original_query=request.original_query,
+                improved_query=request.content,
+            )
+        else:
+            # No improvement: content is the original query
+            storage.update_conversation_queries(
+                conversation_id, user_id=user.id, original_query=request.content
+            )
+
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
@@ -156,13 +174,20 @@ async def send_message(
         request.content
     )
 
-    # Add assistant message with all stages
+    # Add assistant message with all stages and timing
     storage.add_assistant_message(
         conversation_id,
         user_id=user.id,
         stage1=stage1_results,
         stage2=stage2_results,
-        stage3=stage3_result
+        stage3=stage3_result,
+        stage1_duration_ms=metadata.get("stage1_duration_ms"),
+        stage2_duration_ms=metadata.get("stage2_duration_ms"),
+        stage3_duration_ms=metadata.get("stage3_duration_ms"),
+        metadata={
+            "label_to_model": metadata.get("label_to_model"),
+            "aggregate_rankings": metadata.get("aggregate_rankings"),
+        },
     )
 
     # Return the complete response with metadata
@@ -195,12 +220,22 @@ async def send_message_stream(
     # Get the list of copilot models for the frontend
     copilot_models = get_copilot_models()
 
-    # Capture user_id for use in the generator closure
+    # Capture values for use in the generator closure
     user_id = user.id
+    # IMPORTANT: Capture conversation_id explicitly to avoid closure issues
+    captured_conversation_id = conversation_id
+
+    logger.info(f"[STREAM] Starting stream for conversation_id={captured_conversation_id}, user_id={user_id}")
 
     async def event_generator():
         # Queue for model completion events during stage 1
         model_events = asyncio.Queue()
+        logger.info(f"[STREAM] event_generator started for conversation_id={captured_conversation_id}")
+
+        # Track timing for each stage
+        stage1_duration_ms = 0
+        stage2_duration_ms = 0
+        stage3_duration_ms = 0
 
         async def on_model_complete(model: str, response_content, success: bool, elapsed_ms: int):
             """Callback when a model completes - adds event to queue."""
@@ -214,8 +249,34 @@ async def send_message_stream(
             await model_events.put(event)
 
         try:
-            # Add user message
-            storage.add_user_message(conversation_id, user_id=user_id, content=request.content)
+            # Step 1: Save user message immediately (incremental persistence)
+            user_message_id = storage.add_user_message(
+                captured_conversation_id, user_id=user_id, content=request.content
+            )
+            logger.info(f"[STREAM] Saved user message {user_message_id} to conversation {captured_conversation_id}")
+
+            # Store the original/improved query for first message
+            if is_first_message:
+                if request.original_query:
+                    # User improved the prompt: original_query has the original, content has improved
+                    storage.update_conversation_queries(
+                        captured_conversation_id,
+                        user_id=user_id,
+                        original_query=request.original_query,
+                        improved_query=request.content,
+                    )
+                    logger.info(f"[STREAM] Saved queries (with improvement) to conversation {captured_conversation_id}")
+                else:
+                    # No improvement: content is the original query
+                    storage.update_conversation_queries(
+                        captured_conversation_id, user_id=user_id, original_query=request.content
+                    )
+                    logger.info(f"[STREAM] Saved original query to conversation {captured_conversation_id}")
+
+            # Step 2: Create assistant response placeholder for incremental updates
+            # In the FK design, the response is linked to the user message via foreign key
+            response_id = storage.create_response_placeholder(user_message_id)
+            logger.info(f"[STREAM] Created response placeholder {response_id} for user message {user_message_id}")
 
             # Start title generation in parallel (don't await yet)
             title_task = None
@@ -224,6 +285,8 @@ async def send_message_stream(
 
             # Stage 1: Collect responses with individual model progress
             yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
+
+            stage1_start = time.time()
 
             # Start stage1 with progress tracking
             stage1_task = asyncio.create_task(
@@ -239,39 +302,72 @@ async def send_message_stream(
 
             # Wait for stage1 to complete and get results
             stage1_results = await stage1_task
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+
+            # Step 3: Save Stage 1 results immediately (incremental persistence)
+            storage.update_response_stage1(
+                response_id, stage1_results, stage1_duration_ms
+            )
+            logger.info(f"[STREAM] Saved stage1 results for response {response_id} (user message {user_message_id})")
+
+            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+            stage2_start = time.time()
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+
+            # Step 4: Save Stage 2 results immediately (incremental persistence)
+            metadata = {
+                "label_to_model": label_to_model,
+                "aggregate_rankings": aggregate_rankings,
+            }
+            storage.update_response_stage2(
+                response_id, stage2_results, stage2_duration_ms, metadata
+            )
+            logger.info(f"[STREAM] Saved stage2 results for response {response_id} (user message {user_message_id})")
+
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': metadata})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+            stage3_start = time.time()
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+            stage3_duration_ms = int((time.time() - stage3_start) * 1000)
+
+            # Step 5: Save Stage 3 results immediately (incremental persistence)
+            storage.update_response_stage3(
+                response_id, stage3_result, stage3_duration_ms
+            )
+            logger.info(f"[STREAM] Saved stage3 results for response {response_id} (user message {user_message_id})")
+
+            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'duration_ms': stage3_duration_ms})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
-                storage.update_conversation_title(conversation_id, user_id=user_id, title=title)
+                storage.update_conversation_title(captured_conversation_id, user_id=user_id, title=title)
+                logger.info(f"[STREAM] Saved title '{title}' to conversation {captured_conversation_id}")
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
-            storage.add_assistant_message(
-                conversation_id,
-                user_id=user_id,
-                stage1=stage1_results,
-                stage2=stage2_results,
-                stage3=stage3_result
-            )
-
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            # Send completion event with total timing
+            total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
+            yield f"data: {json.dumps({'type': 'complete', 'total_duration_ms': total_duration_ms})}\n\n"
 
         except Exception as e:
+            # Cancel title_task if it exists and is still running
+            if title_task is not None and not title_task.done():
+                title_task.cancel()
+                try:
+                    await title_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
             # Send error event
+            logger.exception("Error in streaming endpoint")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
