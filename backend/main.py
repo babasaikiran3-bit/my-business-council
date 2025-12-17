@@ -248,6 +248,9 @@ async def send_message_stream(
             }
             await model_events.put(event)
 
+        # Initialize response_id before try block so it's accessible in except for cleanup
+        response_id = None
+
         try:
             # Step 1: Save user message immediately (incremental persistence)
             user_message_id = storage.add_user_message(
@@ -278,10 +281,45 @@ async def send_message_stream(
             response_id = storage.create_response_placeholder(user_message_id)
             logger.info(f"[STREAM] Created response placeholder {response_id} for user message {user_message_id}")
 
-            # Start title generation in parallel (don't await yet)
+            # Start title generation in parallel with its own queue for immediate emission
             title_task = None
+            title_queue: asyncio.Queue = asyncio.Queue()
+            title_emitted = False
+
+            async def title_generation_wrapper():
+                """Wrapper that generates title and puts result in queue for immediate emission."""
+                try:
+                    logger.info(f"[STREAM] Starting title generation for conversation {captured_conversation_id}")
+                    title = await generate_conversation_title(request.content)
+                    logger.info(f"[STREAM] Title generation completed: '{title}' for conversation {captured_conversation_id}")
+                    await title_queue.put(title)
+                    return title
+                except Exception as e:
+                    logger.error(f"[STREAM] Title generation error: {e}")
+                    await title_queue.put(None)
+                    return None
+
             if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+                logger.info(f"[STREAM] is_first_message=True, starting title task for conversation {captured_conversation_id}")
+                title_task = asyncio.create_task(title_generation_wrapper())
+            else:
+                logger.info(f"[STREAM] is_first_message=False, skipping title generation for conversation {captured_conversation_id}")
+
+            # Helper to check and emit title if ready (non-blocking)
+            async def check_and_emit_title():
+                nonlocal title_emitted
+                if title_emitted or title_task is None:
+                    return None
+                try:
+                    title = title_queue.get_nowait()
+                    if title:
+                        storage.update_conversation_title(captured_conversation_id, user_id=user_id, title=title)
+                        logger.info(f"[STREAM] Saved title '{title}' to conversation {captured_conversation_id}")
+                        title_emitted = True
+                        return f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+                except asyncio.QueueEmpty:
+                    pass
+                return None
 
             # Stage 1: Collect responses with individual model progress
             yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
@@ -293,16 +331,25 @@ async def send_message_stream(
                 stage1_collect_responses_with_progress(request.content, on_model_complete)
             )
 
-            # Emit model completion events as they arrive
+            # Emit model completion events as they arrive, checking for title in between
             models_remaining = len(copilot_models)
             while models_remaining > 0:
                 event = await model_events.get()
                 yield f"data: {json.dumps(event)}\n\n"
                 models_remaining -= 1
+                # Check if title is ready while waiting for model responses
+                title_event = await check_and_emit_title()
+                if title_event:
+                    yield title_event
 
             # Wait for stage1 to complete and get results
             stage1_results = await stage1_task
             stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+
+            # Check for title after stage1 completes
+            title_event = await check_and_emit_title()
+            if title_event:
+                yield title_event
 
             # Step 3: Save Stage 1 results immediately (incremental persistence)
             storage.update_response_stage1(
@@ -318,6 +365,11 @@ async def send_message_stream(
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+
+            # Check for title after stage2 completes
+            title_event = await check_and_emit_title()
+            if title_event:
+                yield title_event
 
             # Step 4: Save Stage 2 results immediately (incremental persistence)
             metadata = {
@@ -337,6 +389,11 @@ async def send_message_stream(
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
             stage3_duration_ms = int((time.time() - stage3_start) * 1000)
 
+            # Check for title after stage3 completes
+            title_event = await check_and_emit_title()
+            if title_event:
+                yield title_event
+
             # Step 5: Save Stage 3 results immediately (incremental persistence)
             storage.update_response_stage3(
                 response_id, stage3_result, stage3_duration_ms
@@ -345,12 +402,18 @@ async def send_message_stream(
 
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'duration_ms': stage3_duration_ms})}\n\n"
 
-            # Wait for title generation if it was started
-            if title_task:
-                title = await title_task
-                storage.update_conversation_title(captured_conversation_id, user_id=user_id, title=title)
-                logger.info(f"[STREAM] Saved title '{title}' to conversation {captured_conversation_id}")
-                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+            # Final check: ensure title is emitted before completion if still pending
+            if title_task and not title_emitted:
+                try:
+                    title = await asyncio.wait_for(title_task, timeout=5.0)
+                    if title and not title_emitted:
+                        storage.update_conversation_title(captured_conversation_id, user_id=user_id, title=title)
+                        logger.info(f"[STREAM] Saved title '{title}' to conversation {captured_conversation_id}")
+                        yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+                except asyncio.TimeoutError:
+                    logger.warning(f"[STREAM] Title generation timed out for conversation {captured_conversation_id}")
+                except Exception as e:
+                    logger.error(f"[STREAM] Title generation error: {e}")
 
             # Send completion event with total timing
             total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
@@ -366,9 +429,19 @@ async def send_message_stream(
                     pass
                 except Exception:
                     pass
-            # Send error event
+
+            # Clean up incomplete assistant response placeholder to prevent
+            # "Chairman: Unknown" from showing in the UI
+            if response_id is not None:
+                deleted = storage.delete_response_placeholder(response_id)
+                if deleted:
+                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
+                else:
+                    logger.warning(f"[STREAM] Failed to delete response placeholder {response_id}")
+
+            # Send error event with conversation_id for frontend cleanup
             logger.exception("Error in streaming endpoint")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'conversation_id': captured_conversation_id})}\n\n"
 
     return StreamingResponse(
         event_generator(),

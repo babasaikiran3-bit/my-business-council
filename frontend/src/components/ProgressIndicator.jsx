@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, CheckCircle2, XCircle, Clock, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -65,7 +66,7 @@ function ModelStatus({ model, status }) {
 /**
  * Stage 1 progress indicator with individual model statuses
  */
-export function Stage1Progress({ modelStatuses, timing }) {
+export function Stage1Progress({ modelStatuses, timing, onCancel }) {
   const models = Object.keys(modelStatuses);
   const receivedCount = Object.values(modelStatuses).filter(
     (s) => s === "received"
@@ -96,9 +97,21 @@ export function Stage1Progress({ modelStatuses, timing }) {
               ({receivedCount + failedCount}/{totalCount} models)
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="h-3.5 w-3.5" />
-            <span className="font-mono">{timeDisplay}</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              <span className="font-mono">{timeDisplay}</span>
+            </div>
+            {!timing.completed && onCancel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+                className="h-6 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <Square className="h-3 w-3 fill-current" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -143,7 +156,7 @@ function getStageStyle(stage) {
 /**
  * Generic stage loading indicator with timer
  */
-export function StageProgress({ stage, label, timing }) {
+export function StageProgress({ stage, label, timing, onCancel }) {
   const timeDisplay = timing.completed
     ? `Completed in ${formatTime(timing.elapsed)}`
     : formatTime(timing.elapsed);
@@ -167,9 +180,21 @@ export function StageProgress({ stage, label, timing }) {
               {label}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="h-3.5 w-3.5" />
-            <span className="font-mono">{timeDisplay}</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              <span className="font-mono">{timeDisplay}</span>
+            </div>
+            {!timing.completed && onCancel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+                className="h-6 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <Square className="h-3 w-3 fill-current" />
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>

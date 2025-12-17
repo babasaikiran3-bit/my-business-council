@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { CheckCircle2, Clock } from "lucide-react"
+import { getModelDisplayName } from "@/lib/utils"
 
 /**
  * Format elapsed time in seconds with 1 decimal place
@@ -31,7 +32,7 @@ export default function Stage3({ finalResponse, timing }) {
           )}
         </div>
         <CardDescription className="text-xs font-mono">
-          Chairman: {finalResponse.model.split('/')[1] || finalResponse.model}
+          Chairman: {getModelDisplayName(finalResponse.model)}
         </CardDescription>
       </CardHeader>
       <CardContent>

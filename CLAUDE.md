@@ -35,8 +35,10 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 ### WorkOS AuthKit Authentication (Phase 1)
 - **Provider**: WorkOS AuthKit with Microsoft OAuth (SSO)
 - **Email Domain Validation**: Only `@eternal.ag` emails allowed (403 for others)
-- **Token Caching**: 45-second TTL cache using `cachetools.TTLCache` to reduce WorkOS API calls
-- **User-Scoped Storage**: Conversations stored in `data/users/{user_id}/conversations/`
+- **Token Verification**: Local JWT validation using JWKS (no per-request API calls)
+- **Token Caching**: 45-second TTL cache using `cachetools.TTLCache` for verified tokens
+- **JWKS Caching**: 1-hour TTL cache to avoid repeated JWKS fetches
+- **User-Scoped Storage**: Conversations stored in Supabase with `user_id` column for scoping
 - **Frontend Components**:
   - `AuthGuard.jsx` - Protects routes, shows sign-in screen
   - `Callback.jsx` - Handles OAuth callback at `/callback` route (auto-handled by AuthKitProvider)
@@ -53,16 +55,136 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
   3. Session timeout after 7 days (max length) or inactivity timeout
 - **Sign-out Redirect**: Must be configured in WorkOS Dashboard → Redirects → Sign-out redirects
 
+### WorkOS SDK v5.0+ JWT Validation Fix (December 2024)
+
+**Problem**: After integrating WorkOS authentication, all API requests failed with 401 Unauthorized.
+
+**Root Cause**: The code was calling `workos.user_management.get_user_by_access_token(token)` which **does not exist** in WorkOS Python SDK v5.0+. This method was either removed or never existed in this SDK version.
+
+**Error Message**:
+```
+Token verification failed: 'UserManagement' object has no attribute 'get_user_by_access_token'
+```
+
+**Solution**: Replaced the non-existent API call with local JWT validation using JWKS (JSON Web Key Set):
+
+1. **Added dependency**: `python-jose[cryptography]>=3.3.0` to `requirements.txt`
+
+2. **New `get_jwks()` function** in `backend/auth.py`:
+   - Fetches JWKS from WorkOS via `workos.user_management.get_jwks_url()`
+   - Caches JWKS for 1 hour to avoid repeated fetches
+   - Falls back to expired cache if fetch fails
+
+3. **Rewrote `verify_workos_token()` function**:
+   - Validates JWT locally using RS256 algorithm
+   - Extracts user info from JWT claims (`sub`, `email`, `first_name`, `last_name`)
+   - Fallback: if `email` not in JWT, fetches user details from WorkOS API using `get_user(user_id)`
+
+**Key Code Pattern**:
+```python
+from jose import JWTError, jwt
+
+# Fetch JWKS (cached for 1 hour)
+jwks = await get_jwks()
+
+# Validate JWT locally
+payload = jwt.decode(
+    token,
+    jwks,
+    algorithms=["RS256"],
+    audience=WORKOS_CLIENT_ID,
+    options={
+        "verify_signature": True,
+        "verify_exp": True,
+        "verify_aud": True,
+    }
+)
+
+# Extract user info from claims
+user_id = payload.get("sub")
+email = payload.get("email", "")
+
+# Fallback: fetch from WorkOS API if email not in token
+if not email:
+    user = workos.user_management.get_user(user_id=user_id)
+    email = user.email
+```
+
+**Files Modified**:
+| File | Change |
+|------|--------|
+| `requirements.txt` | Added `python-jose[cryptography]>=3.3.0` |
+| `backend/auth.py` | Added `get_jwks()`, rewrote `verify_workos_token()` |
+
+**Verification**: After fix, errors changed from 401 (token verification) to 403 (email domain validation), confirming JWT validation works correctly.
+
+### FK Schema Migration (December 16, 2024)
+
+**Migrated from polymorphic `messages` table to FK design across all environments.**
+
+The original schema used a single `messages` table with a `role` column (`user`/`assistant`) and sparse columns for stage data. This was refactored to:
+- `messages` table: User messages only (no `role` column)
+- `assistant_responses` table: AI responses with 1:1 FK to `messages`
+
+**Migration Script**: `scripts/migrate_to_fk_design.sql`
+
+**Supabase Environments Migrated**:
+| Environment | Project ID | Region | Status | Date |
+|-------------|------------|--------|--------|------|
+| Development | `logtcdlczkdkglxmosyz` | eu-central-1 | ✅ Complete | Dec 16, 2024 |
+| Staging | `ggfwstjrjckkecchxjhp` | eu-west-2 | ✅ Complete | Dec 16, 2024 |
+| Production | `vthibdgqnxfbjrscxdlf` | eu-west-1 | ✅ Complete | Dec 16, 2024 |
+
+**Production Data Migration Results**:
+| Metric | Before | After | Notes |
+|--------|--------|-------|-------|
+| Conversations | 62 | 62 | Preserved |
+| User Messages | 6 | 6 | Preserved |
+| Assistant Messages | 9 | — | Deleted from old table |
+| Assistant Responses | — | 3 | Migrated to new table |
+| Orphaned Data | — | 6 deleted | Assistant messages without preceding user messages |
+
+**Orphaned Data Discovery**: 6 of 9 assistant messages in production had no preceding user message (orphaned data created during early development/testing). These were deleted during migration as they couldn't be linked to a user message.
+
+**Verification Checklist** (all passed on all environments):
+- ✅ `messages` table has no `role` column
+- ✅ `assistant_responses` table exists with correct columns
+- ✅ FK constraint `fk_assistant_responses_user_message` with CASCADE delete
+- ✅ UNIQUE constraint on `user_message_id` (enforces 1:1 relationship)
+- ✅ Indexes: `idx_assistant_responses_user_message_id`, `idx_assistant_responses_created_at`
+- ✅ RLS enabled with 3 policies (SELECT, INSERT, UPDATE)
+- ✅ No orphaned records in any table
+- ✅ All 17 storage tests pass
+
+### Test Data Cleanup Implementation
+
+**Problem**: Test suite was polluting development database with test conversations (32+ phantom conversations).
+
+**Solution**: Implemented automatic cleanup in `tests/conftest.py`:
+```python
+@pytest.fixture(autouse=True)
+def cleanup_test_data(test_user_id):
+    """Cleanup test data after each test to prevent database pollution."""
+    yield
+    from backend.storage import get_supabase_client
+    try:
+        supabase = get_supabase_client()
+        supabase.table("conversations").delete().eq("user_id", test_user_id).execute()
+    except Exception as e:
+        print(f"Warning: Failed to cleanup test data for {test_user_id}: {e}")
+```
+
+**Test User ID Pattern**: `test_user_{uuid_hex[:8]}` (e.g., `test_user_409b4ae3`)
+
 ## Architecture
 
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COPILOT_MODELS` (list of OpenRouter model identifiers) - currently 5 models:
+- Contains `COPILOT_MODELS` (list of OpenRouter model identifiers) - currently 4 models:
   - `openai/gpt-5.2-pro`
   - `google/gemini-3-pro-preview`
   - `anthropic/claude-opus-4.5`
-  - `x-ai/grok-code-fast-1`
   - `x-ai/grok-4`
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer) - currently `google/gemini-3-pro-preview`
 - Contains `PROMPT_IMPROVER_MODEL` (model for "Improve Prompt" feature) - currently `google/gemini-3-pro-preview`
@@ -90,18 +212,21 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 - `generate_conversation_title()`: Uses `google/gemini-2.5-flash` for fast title generation from first message
 - `run_full_copilot()`: Orchestrates the complete 3-stage process
 
-**`auth.py`** (NEW - WorkOS Authentication)
-- `AuthenticatedUser` dataclass with `id`, `email`, `first_name`, `last_name`
+**`auth.py`** (WorkOS Authentication with JWT Validation)
+- `AuthenticatedUser` dataclass with `id`, `email`, `name`, `profile_picture_url`
+- `get_jwks()`: Fetches and caches JWKS from WorkOS (1-hour TTL) for local JWT validation
 - `validate_email_domain()`: Enforces `@eternal.ag` emails (raises 403 for others)
-- `verify_workos_token()`: Verifies tokens with WorkOS API, uses 45s TTL cache with asyncio lock
+- `verify_workos_token()`: Validates JWT locally using JWKS + RS256, extracts user info from claims, fallback to WorkOS API if email not in token
 - `get_current_user()`: FastAPI dependency for protected endpoints (returns `AuthenticatedUser`)
 - `get_workos_client()`: Singleton pattern for WorkOS client initialization
+- **Important**: Uses `python-jose` for JWT validation, NOT WorkOS SDK's non-existent `get_user_by_access_token()` method
 
 **`storage.py`**
-- JSON-based conversation storage in `data/users/{user_id}/conversations/`
+- Supabase-backed conversation storage with FK design
 - All functions require `user_id` parameter to scope data by authenticated user
-- Each conversation: `{id, created_at, messages[]}`
-- Assistant messages contain: `{role, stage1, stage2, stage3}`
+- Tables: `conversations` → `messages` (user only) → `assistant_responses` (1:1 FK)
+- User messages stored in `messages` table, AI responses in `assistant_responses`
+- `_convert_joined_row_to_messages()`: Handles Supabase's 1:1 nested select (returns dict, not array)
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
 
 **`main.py`**
@@ -115,7 +240,9 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
   - `POST /api/conversations/{id}/message` - Send message (batch response)
   - `POST /api/conversations/{id}/message/stream` - Send message with SSE streaming
 - Streaming endpoint sends Server-Sent Events for progressive UI updates:
-  - `stage1_start`, `stage1_complete`, `stage2_start`, `stage2_complete`, `stage3_start`, `stage3_complete`
+  - `stage1_start` - includes list of models being queried
+  - `model_response` - fires for each model as it responds (includes model name, success status, elapsed_ms)
+  - `stage1_complete`, `stage2_start`, `stage2_complete`, `stage3_start`, `stage3_complete`
   - `title_complete` - when conversation title is generated
   - `complete` - when all stages finish
   - `error` - on failure
@@ -143,8 +270,9 @@ useEffect(() => {
 
 **`components/Callback.jsx`** (NEW)
 - Handles OAuth redirect from WorkOS
-- Uses `handleCallback` from useAuth hook
-- Shows error state with retry option using shadcn/ui components
+- AuthKitProvider processes callback automatically; component waits for auth completion
+- Redirects to home page after authentication completes
+- Shows loading spinner during sign-in process
 
 **`components/UserMenu.jsx`** (NEW)
 - Displays current user info with avatar/initials
@@ -183,6 +311,14 @@ useEffect(() => {
 **`components/Stage3.jsx`**
 - Final synthesized answer from Lead Synthesizer
 - Uses `bg-muted/30` background to highlight conclusion (shadcn/ui style)
+
+**`components/ProgressIndicator.jsx`**
+- `Stage1Progress`: Shows individual model statuses during Stage 1 collection
+  - Displays each model's status: processing (spinner), received (checkmark), failed (X)
+  - Shows elapsed time and completion status
+- `StageProgress`: Generic stage loading indicator with timer
+  - Used for Stage 2 and Stage 3 progress display
+  - Color-coded by stage (blue for Stage 2, purple for Stage 3)
 
 **`components/ui/*.jsx`** (shadcn/ui Components)
 - `button.jsx` - Button with variants (default, destructive, outline, secondary, ghost, link)
@@ -330,6 +466,16 @@ Then run `source ~/.zshrc` or restart terminal.
 10. **No tailwind.config.js**: This is intentional for Tailwind CSS v4. Configuration is done via `@theme` directive in `index.css`, not JavaScript.
 11. **WorkOS Client ID Must Be in Both .env Files**: `WORKOS_CLIENT_ID` (backend) and `VITE_WORKOS_CLIENT_ID` (frontend) must have the same value. If only one is set, either backend token validation or frontend OAuth will fail.
 12. **Authentication Configuration Error Screen**: If frontend shows "Configuration Error", ensure `VITE_WORKOS_CLIENT_ID` is set in `frontend/.env`. If backend returns 500, ensure `WORKOS_API_KEY` and `WORKOS_CLIENT_ID` are set in root `.env`.
+13. **Supabase 1:1 Nested Select Returns Dict, Not Array**: When querying `messages` with nested `assistant_responses` using a UNIQUE FK, Supabase returns a single dict instead of an array. The `_convert_joined_row_to_messages()` function handles both cases:
+```python
+# Handle both dict (1:1) and array (1:N) cases
+response = None
+if isinstance(response_data, dict) and response_data:
+    response = response_data  # 1:1 returns single dict
+elif isinstance(response_data, list) and len(response_data) > 0:
+    response = response_data[0]  # 1:N returns array
+```
+14. **WorkOS SDK v5.0+ Breaking Change**: The `get_user_by_access_token()` method **does not exist** in WorkOS Python SDK v5.0+. Use local JWT validation with JWKS instead. Access tokens are JWTs that should be validated locally using the RS256 algorithm and the JWKS endpoint from `workos.user_management.get_jwks_url()`. See the "WorkOS SDK v5.0+ JWT Validation Fix" section above for implementation details.
 
 ## Future Enhancement Ideas
 

@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CheckCircle2, Clock } from "lucide-react"
+import { getModelDisplayName } from "@/lib/utils"
 
 /**
  * Format elapsed time in seconds with 1 decimal place
@@ -54,7 +55,7 @@ export default function Stage1({ responses, timing, modelStatuses, modelTimings 
           <TabsList className="mb-3 flex-wrap h-auto">
             {responses.map((resp, index) => (
               <TabsTrigger key={index} value={String(index)} className="text-xs">
-                {resp.model.split('/')[1] || resp.model}
+                {getModelDisplayName(resp.model)}
               </TabsTrigger>
             ))}
           </TabsList>

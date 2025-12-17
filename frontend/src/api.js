@@ -198,41 +198,56 @@ export const api = {
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @param {string|null} originalQuery - Original query before improvement (if prompt was improved)
+   * @param {Object} options - Additional options
+   * @param {string|null} options.originalQuery - Original query before improvement (if prompt was improved)
+   * @param {AbortSignal|null} options.signal - AbortController signal for cancellation
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent, originalQuery = null) {
+  async sendMessageStream(conversationId, content, onEvent, options = {}) {
+    const { originalQuery = null, signal = null } = options;
     const authHeaders = await this.getAuthHeaders();
     const body = { content };
     if (originalQuery) {
       body.original_query = originalQuery;
     }
+
+    const fetchOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify(body),
+    };
+
+    // Add abort signal if provided
+    if (signal) {
+      fetchOptions.signal = signal;
+    }
+
     let response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders,
-        },
-        body: JSON.stringify(body),
-      }
+      fetchOptions
     );
 
     // Handle 401 with token refresh for SSE
     if (response.status === 401) {
       console.log('SSE received 401, attempting token refresh and retry...');
       const newHeaders = await this.refreshToken();
+      const retryOptions = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...newHeaders,
+        },
+        body: JSON.stringify(body),
+      };
+      if (signal) {
+        retryOptions.signal = signal;
+      }
       response = await fetch(
         `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...newHeaders,
-          },
-          body: JSON.stringify(body),
-        }
+        retryOptions
       );
     }
 
@@ -246,24 +261,44 @@ export const api = {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        // Check if aborted before reading
+        if (signal?.aborted) {
+          reader.cancel();
+          throw new DOMException('Stream aborted', 'AbortError');
+        }
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const event = JSON.parse(data);
+              onEvent(event.type, event);
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e);
+            }
           }
         }
       }
+    } catch (error) {
+      // Re-throw AbortError for proper handling upstream
+      if (error.name === 'AbortError') {
+        throw error;
+      }
+      // For other errors, try to cancel the reader and re-throw
+      try {
+        reader.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
+      throw error;
     }
   },
 };

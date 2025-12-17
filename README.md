@@ -108,7 +108,6 @@ COPILOT_MODELS = [
     "openai/gpt-5.2-pro",
     "google/gemini-3-pro-preview",
     "anthropic/claude-opus-4.5",
-    "x-ai/grok-code-fast-1",
     "x-ai/grok-4",
 ]
 
@@ -149,7 +148,7 @@ Then open http://localhost:5173 in your browser.
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API, Server-Sent Events (SSE) for streaming
 - **Frontend:** React + Vite 7.x, Tailwind CSS v4 (CSS-first configuration), shadcn/ui components
 - **UI Components:** shadcn/ui with Radix UI primitives (Button, Card, Tabs, Textarea, ScrollArea)
-- **Storage:** JSON files in `data/conversations/`
+- **Storage:** Supabase (PostgreSQL) with user-scoped conversations
 - **Package Management:** uv for Python, npm for JavaScript
 
 ## UI Features

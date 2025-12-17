@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { PlusCircle, MessageSquare, GripVertical } from "lucide-react"
+import { PlusCircle, MessageSquare, GripVertical, Loader2, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SIDEBAR_MIN_WIDTH = 240;
 const SIDEBAR_MAX_WIDTH = 480;
 const SIDEBAR_DEFAULT_WIDTH = 288; // w-72
-const STORAGE_KEY = 'eternal-copilot-sidebar-width';
+const STORAGE_KEY = 'eternal-ops-sidebar-width';
 
 /**
  * Format a timestamp into a human-readable relative or absolute format.
@@ -69,6 +68,8 @@ export default function Sidebar({
   onSelectConversation,
   onNewConversation,
   userMenu,
+  processingConversations = new Map(), // Map of conversation IDs that are currently processing
+  onCancelStream, // Handler to cancel stream for a specific conversation
 }) {
   const [width, setWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -127,20 +128,21 @@ export default function Sidebar({
   return (
     <div
       ref={sidebarRef}
-      className="bg-muted/40 border-r flex flex-col h-screen relative shrink-0"
+      className="bg-muted/40 border-r flex flex-col h-full relative shrink-0 overflow-hidden"
       style={{ width: `${width}px` }}
     >
       {/* Header section with increased horizontal padding */}
-      <div className="px-14 py-8 border-b space-y-8">
-        <h1 className="text-xl font-semibold text-foreground">Eternal Copilot</h1>
+      <div className="px-14 py-8 border-b space-y-8 shrink-0">
+        <h1 className="text-xl font-semibold text-foreground">Eternal Ops Control</h1>
         <Button className="w-full h-10" onClick={onNewConversation}>
           <PlusCircle className="h-4 w-4 mr-2" />
           New Conversation
         </Button>
       </div>
 
-      {/* Conversation list - padding must be INSIDE ScrollArea content, not on ScrollArea itself */}
-      <ScrollArea className="flex-1">
+      {/* Conversation list - using native scrolling for reliability */}
+      {/* flex-1 min-h-0 pattern: flex-1 fills space, min-h-0 allows shrinking below content size, overflow-y-auto enables scrolling */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-12 pt-5 pb-4">
           {conversations.length === 0 ? (
             <div className="p-6 text-center text-muted-foreground text-sm">
@@ -150,6 +152,7 @@ export default function Sidebar({
             <div className="space-y-3">
               {conversations.map((conv) => {
                 const timestamp = formatTimestamp(conv.created_at);
+                const isProcessing = processingConversations.has(conv.id);
                 return (
                   <button
                     key={conv.id}
@@ -163,21 +166,49 @@ export default function Sidebar({
                     onClick={() => onSelectConversation(conv.id)}
                   >
                     <div className="flex items-start gap-3">
-                      <MessageSquare className="h-4 w-4 mt-0.5 shrink-0" />
+                      {isProcessing ? (
+                        <Loader2 className="h-4 w-4 mt-0.5 shrink-0 animate-spin text-primary" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 mt-0.5 shrink-0" />
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium truncate">
                           {conv.title || 'New Conversation'}
                         </div>
                         <div className="text-xs text-muted-foreground/70 mt-1 flex items-center gap-2">
-                          <span>{conv.message_count} messages</span>
-                          {timestamp && (
+                          {isProcessing ? (
+                            <span className="text-primary">Processing...</span>
+                          ) : (
                             <>
-                              <span className="text-muted-foreground/40">•</span>
-                              <span>{timestamp}</span>
+                              <span>{conv.message_count} messages</span>
+                              {timestamp && (
+                                <>
+                                  <span className="text-muted-foreground/40">•</span>
+                                  <span>{timestamp}</span>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
                       </div>
+                      {/* Stop button for processing conversations */}
+                      {isProcessing && onCancelStream && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCancelStream(conv.id)
+                          }}
+                          className={cn(
+                            'p-1 rounded hover:bg-destructive/10 transition-colors',
+                            'text-destructive hover:text-destructive',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                          )}
+                          title="Stop processing"
+                        >
+                          <Square className="h-3.5 w-3.5 fill-current" />
+                        </button>
+                      )}
                     </div>
                   </button>
                 );
@@ -185,10 +216,12 @@ export default function Sidebar({
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
-      {/* User menu at the bottom */}
-      {userMenu}
+      {/* User menu at the bottom - shrink-0 ensures it doesn't shrink when scroll area fills */}
+      <div className="shrink-0">
+        {userMenu}
+      </div>
 
       {/* Resize handle */}
       <div

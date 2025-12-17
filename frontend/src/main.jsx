@@ -1,10 +1,39 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { AuthKitProvider } from '@workos-inc/authkit-react'
+import { Toaster } from 'sonner'
+import { onCLS, onFCP, onLCP, onTTFB } from 'web-vitals'
 import './index.css'
 import App from './App.jsx'
 import { AuthConfigError } from './components/AuthGuard'
+
+// Create a data router to support useBlocker hook for navigation blocking
+// This is required for React Router v6.4+ features like useBlocker
+const router = createBrowserRouter([
+  {
+    path: '*',
+    element: <App />,
+  },
+])
+
+// Report Core Web Vitals in production for performance monitoring
+// These metrics help track:
+// - CLS (Cumulative Layout Shift): Visual stability
+// - FCP (First Contentful Paint): Initial render speed
+// - LCP (Largest Contentful Paint): Main content load time
+// - TTFB (Time to First Byte): Server response time
+if (import.meta.env.PROD) {
+  const reportWebVitals = (metric) => {
+    console.log('[Web Vitals]', metric.name, metric.value)
+    // TODO: Send to analytics service
+    // Example: analytics.track('web-vital', metric)
+  }
+  onCLS(reportWebVitals)
+  onFCP(reportWebVitals)
+  onLCP(reportWebVitals)
+  onTTFB(reportWebVitals)
+}
 
 const WORKOS_CLIENT_ID = import.meta.env.VITE_WORKOS_CLIENT_ID
 const WORKOS_REDIRECT_URI = import.meta.env.VITE_WORKOS_REDIRECT_URI
@@ -25,23 +54,24 @@ if (!WORKOS_CLIENT_ID) {
   // - Access token duration: 5-15 minutes (short for security, auto-refreshed)
   createRoot(document.getElementById('root')).render(
     <StrictMode>
-      <BrowserRouter>
-        <AuthKitProvider
-          clientId={WORKOS_CLIENT_ID}
-          redirectUri={WORKOS_REDIRECT_URI}
-          // Refresh tokens 60 seconds before they expire to ensure seamless session continuity
-          // This prevents any gap where the user might be logged out momentarily
-          refreshBufferInterval={60}
-          // Optional: Handle refresh failures (e.g., session expired server-side)
-          onRefreshFailure={(error) => {
-            console.error('Session refresh failed:', error.message)
-            // Session has expired or been revoked - user will need to sign in again
-            // The SDK will automatically show the sign-in screen via AuthGuard
-          }}
-        >
-          <App />
-        </AuthKitProvider>
-      </BrowserRouter>
+      <AuthKitProvider
+        clientId={WORKOS_CLIENT_ID}
+        redirectUri={WORKOS_REDIRECT_URI}
+        // Refresh tokens 60 seconds before they expire to ensure seamless session continuity
+        // This prevents any gap where the user might be logged out momentarily
+        refreshBufferInterval={60}
+        // Optional: Handle refresh failures (e.g., session expired server-side)
+        onRefreshFailure={(error) => {
+          console.error('Session refresh failed:', error.message)
+          // Session has expired or been revoked - user will need to sign in again
+          // The SDK will automatically show the sign-in screen via AuthGuard
+        }}
+      >
+        {/* Use RouterProvider instead of BrowserRouter to support useBlocker hook */}
+        <RouterProvider router={router} />
+        {/* Toast notification container - positioned top-right with rich color styling */}
+        <Toaster position="top-right" richColors closeButton />
+      </AuthKitProvider>
     </StrictMode>,
   )
 }
