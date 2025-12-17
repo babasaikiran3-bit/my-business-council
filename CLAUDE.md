@@ -16,12 +16,14 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 ### shadcn/ui Component Integration
 - Migrated to shadcn/ui component library with Radix UI primitives
 - Uses **zinc color palette** (neutral grays) for the design system
-- Components: Button, Card, Tabs, Textarea, ScrollArea
+- Components: Button, Card, Tabs, Textarea, ScrollArea, Sidebar, DropdownMenu, Separator, Sheet, Tooltip
 
-### Resizable Sidebar Feature
-- Drag the right edge to resize (min: 240px, max: 480px, default: 288px)
-- Width persists in localStorage with key `eternal-copilot-sidebar-width`
-- Visual grip indicator appears on hover
+### Dashboard Architecture (December 2024)
+- **Renamed from "Eternal Copilot" to "Eternal Ops Control"**
+- Transformed from single-purpose Copilot app to multi-feature dashboard
+- Copilot functionality is now one menu item among several (not primary focus)
+- Navigation sidebar with collapsible icon mode using shadcn/ui Sidebar components
+- Feature-based routing with placeholder views for future features
 
 ### CSS Reset Fix
 - **Removed** `margin: 0; padding: 0` from the universal selector (`*`)
@@ -251,40 +253,53 @@ def cleanup_test_data(test_user_id):
 ### Frontend Structure (`frontend/src/`)
 
 **`App.jsx`**
-- Main orchestration: manages conversations list and current conversation
-- Handles message sending and metadata storage
-- Important: metadata is stored in the UI state for display but not persisted to backend JSON
-- Restructured with React Router Routes for `/callback` and protected main app
-- Added useEffect to set token getter for API calls:
-```jsx
-useEffect(() => {
-  api.setTokenGetter(getAccessToken);
-}, [getAccessToken]);
-```
-- Updated Sidebar to receive `userMenu={<UserMenu />}` prop
+- Simplified to ~70 lines after dashboard refactor
+- Uses React Router Routes for `/callback` and protected main app
+- `AuthenticatedApp` component manages feature-based navigation
+- Renders `DashboardLayout` with feature components based on `activeFeature` state
 
-**`components/AuthGuard.jsx`** (NEW)
-- Created component that protects routes and shows sign-in screen
+**`components/dashboard/DashboardLayout.jsx`**
+- Main layout wrapper using SidebarProvider and SidebarInset
+- Takes `activeFeature`, `onFeatureChange`, and `children` props
+
+**`components/dashboard/DashboardSidebar.jsx`**
+- Navigation sidebar with grouped menu items (Overview, AI Tools, Analytics, Administration)
+- Uses shadcn/ui Sidebar components with collapsible icon mode
+- NAV_ITEMS array defines sections: Home, Copilot, Analytics, Reports, Workflows, Team, Security, Settings
+- Copilot and Home are active; other features show "Soon" badge
+
+**`components/dashboard/DashboardHeader.jsx`**
+- Top header with SidebarTrigger and separator
+
+**`components/features/CopilotFeature.jsx`**
+- Complete self-contained Copilot with all streaming/state logic (~450 lines)
+- All SSE streaming, stage timings, model statuses, error handling
+- Uses `ConversationSidebar` and `ChatInterface` components
+
+**`components/features/copilot/ConversationSidebar.jsx`**
+- Secondary sidebar for conversation list within Copilot feature
+- 256px fixed width with ScrollArea for conversation list
+
+**`components/features/HomeFeature.jsx`**
+- Dashboard home page with quick action cards and stats placeholders
+- `onNavigate` prop for navigation to features
+
+**`components/features/PlaceholderFeature.jsx`**
+- Generic "coming soon" placeholder for future features
+
+**`components/AuthGuard.jsx`**
+- Protects routes and shows sign-in screen
 - Exports `AuthGuard` component and `useCurrentUser` hook
 - Uses shadcn/ui Card and Button components for styling
 
-**`components/Callback.jsx`** (NEW)
+**`components/Callback.jsx`**
 - Handles OAuth redirect from WorkOS
 - AuthKitProvider processes callback automatically; component waits for auth completion
-- Redirects to home page after authentication completes
-- Shows loading spinner during sign-in process
 
-**`components/UserMenu.jsx`** (NEW)
-- Displays current user info with avatar/initials
-- Shows sign-out button using lucide-react LogOut icon
-- Uses shadcn/ui Button component
-
-**`components/Sidebar.jsx`**
-- Resizable sidebar with drag-to-resize functionality
-- localStorage persistence for width (key: `eternal-copilot-sidebar-width`)
-- Min: 240px, Max: 480px, Default: 288px
-- Uses shadcn/ui ScrollArea with padding fix (see Common Gotchas)
-- Custom horizontal padding: `px-14` for header, `px-12` for conversation list
+**`components/UserMenu.jsx`**
+- Displays current user info with avatar/initials in sidebar footer
+- Uses shadcn/ui SidebarMenu and DropdownMenu components
+- Sign-out option in dropdown menu
 
 **`components/ChatInterface.jsx`**
 - Multiline textarea (3 rows, resizable) using shadcn/ui Textarea
