@@ -69,9 +69,9 @@ export default function Innovation() {
           <img 
             src="/images/innovation-council.png" 
             alt="Council Background" 
-            className="w-full h-full object-cover opacity-20"
+            className="w-full h-full object-cover opacity-60"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/80 to-background" />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
         </div>
 
         {/* Header */}
