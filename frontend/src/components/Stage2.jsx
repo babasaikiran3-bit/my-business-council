@@ -1,14 +1,14 @@
 import ReactMarkdown from 'react-markdown';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { cn } from "@/lib/utils"
+import { cn, getModelDisplayName } from "@/lib/utils"
 import { CheckCircle2, Clock } from "lucide-react"
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
   let result = text;
   Object.entries(labelToModel).forEach(([label, model]) => {
-    const modelShortName = model.split('/')[1] || model;
+    const modelShortName = getModelDisplayName(model);
     result = result.replace(new RegExp(label, 'g'), `**${modelShortName}**`);
   });
   return result;
@@ -53,7 +53,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, timi
             <TabsList className="mb-3 flex-wrap h-auto">
               {rankings.map((rank, index) => (
                 <TabsTrigger key={index} value={String(index)} className="text-xs">
-                  {rank.model.split('/')[1] || rank.model}
+                  {getModelDisplayName(rank.model)}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -78,7 +78,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, timi
                       {rank.parsed_ranking.map((label, i) => (
                         <li key={i} className="text-muted-foreground">
                           {labelToModel && labelToModel[label]
-                            ? labelToModel[label].split('/')[1] || labelToModel[label]
+                            ? getModelDisplayName(labelToModel[label])
                             : label}
                         </li>
                       ))}
@@ -112,7 +112,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, timi
                     {index + 1}
                   </span>
                   <span className="flex-1 font-medium">
-                    {agg.model.split('/')[1] || agg.model}
+                    {getModelDisplayName(agg.model)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     Avg: {agg.average_rank.toFixed(2)} ({agg.rankings_count} votes)

@@ -370,6 +370,36 @@ def create_response_placeholder(user_message_id: str) -> str:
     return result.data[0]["id"]
 
 
+def delete_response_placeholder(response_id: str) -> bool:
+    """
+    Delete an incomplete assistant response placeholder.
+
+    This is called when an error occurs during the streaming process to clean up
+    the empty placeholder that was created at the start of the stream. This prevents
+    "Chairman: Unknown" from showing in the UI.
+
+    Args:
+        response_id: The assistant response ID to delete
+
+    Returns:
+        True if deletion was successful, False otherwise
+    """
+    supabase = get_supabase_client()
+
+    try:
+        result = (
+            supabase.table("assistant_responses")
+            .delete()
+            .eq("id", response_id)
+            .execute()
+        )
+        return len(result.data) > 0
+    except Exception as e:
+        # Log but don't raise - this is cleanup, main error already happened
+        print(f"Warning: Failed to delete response placeholder {response_id}: {e}")
+        return False
+
+
 def update_response_stage1(
     response_id: str,
     stage1_responses: List[Dict[str, Any]],

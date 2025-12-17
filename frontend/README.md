@@ -1,6 +1,6 @@
-# Eternal Copilot Frontend
+# Eternal Ops Control Frontend
 
-React frontend for the Eternal Copilot application, built with Vite and Tailwind CSS v4.
+React frontend for the Eternal Ops Control dashboard, built with Vite and Tailwind CSS v4.
 
 ## Tech Stack
 
@@ -46,16 +46,27 @@ There is **no `tailwind.config.js` file** - this is intentional for Tailwind v4.
 ```
 src/
 ├── components/
-│   ├── ui/          # shadcn/ui components (Button, Card, Tabs, etc.)
-│   ├── Sidebar.jsx  # Resizable sidebar with conversation list
+│   ├── ui/              # shadcn/ui components (Button, Card, Sidebar, etc.)
+│   ├── dashboard/       # Dashboard layout components
+│   │   ├── DashboardLayout.jsx   # Main layout with sidebar provider
+│   │   ├── DashboardSidebar.jsx  # Navigation sidebar with menu items
+│   │   └── DashboardHeader.jsx   # Top header with sidebar trigger
+│   ├── features/        # Feature-specific components
+│   │   ├── CopilotFeature.jsx       # 3-stage LLM deliberation feature
+│   │   ├── HomeFeature.jsx          # Dashboard home page
+│   │   ├── PlaceholderFeature.jsx   # Coming soon placeholder
+│   │   └── copilot/
+│   │       └── ConversationSidebar.jsx  # Conversation list sidebar
 │   ├── ChatInterface.jsx  # Main chat input and message display
-│   ├── Stage1.jsx   # Individual model responses
-│   ├── Stage2.jsx   # Peer evaluations and rankings
-│   └── Stage3.jsx   # Final synthesized answer
+│   ├── Stage1.jsx         # Individual model responses
+│   ├── Stage2.jsx         # Peer evaluations and rankings
+│   └── Stage3.jsx         # Final synthesized answer
 ├── lib/
 │   └── utils.js     # cn() utility for class merging
+├── hooks/
+│   └── use-mobile.js  # Mobile detection hook for responsive sidebar
 ├── api.js           # API client with SSE streaming support
-├── App.jsx          # Main application component
+├── App.jsx          # Main application with feature routing
 └── index.css        # Tailwind theme and global styles
 ```
 

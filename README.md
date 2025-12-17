@@ -108,7 +108,6 @@ COPILOT_MODELS = [
     "openai/gpt-5.2-pro",
     "google/gemini-3-pro-preview",
     "anthropic/claude-opus-4.5",
-    "x-ai/grok-code-fast-1",
     "x-ai/grok-4",
 ]
 
@@ -149,17 +148,16 @@ Then open http://localhost:5173 in your browser.
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API, Server-Sent Events (SSE) for streaming
 - **Frontend:** React + Vite 7.x, Tailwind CSS v4 (CSS-first configuration), shadcn/ui components
 - **UI Components:** shadcn/ui with Radix UI primitives (Button, Card, Tabs, Textarea, ScrollArea)
-- **Storage:** JSON files in `data/conversations/`
+- **Storage:** Supabase (PostgreSQL) with user-scoped conversations
 - **Package Management:** uv for Python, npm for JavaScript
 
 ## UI Features
 
-### Resizable Sidebar
-The sidebar can be resized by dragging its right edge:
-- **Minimum width:** 240px
-- **Maximum width:** 480px
-- **Default width:** 288px
-- Width is automatically saved to localStorage and restored on page reload
+### Dashboard Navigation
+The application uses a shadcn/ui Sidebar component for navigation:
+- **Collapsible sidebar:** Toggle between full and icon-only modes
+- **Feature-based navigation:** Access Copilot, Analytics, Reports, and more
+- **Responsive design:** Mobile-friendly with sheet overlay on small screens
 
 ### Progressive Streaming Updates
 The application uses Server-Sent Events (SSE) for real-time updates:
@@ -254,23 +252,23 @@ Kill the conflicting process or modify the port in `backend/main.py`.
 2. If that doesn't work, open DevTools → right-click the refresh button → "Empty Cache and Hard Reload"
 3. As a last resort, restart the Vite dev server
 
-### Sidebar padding not appearing
+### ScrollArea padding not appearing
 
-**Problem:** The sidebar content appears too close to the edges with no horizontal padding.
+**Problem:** Content inside a ScrollArea appears too close to the edges with no padding.
 
-**Cause:** This can happen if there's a CSS conflict or if the ScrollArea component isn't structured correctly.
+**Cause:** Radix ScrollArea wraps content in a Viewport that doesn't inherit root padding.
 
 **Solution:** Ensure padding is applied to an inner `<div>` wrapper inside ScrollArea, not to the ScrollArea component itself:
 ```jsx
 // ✓ Correct
 <ScrollArea className="flex-1">
-  <div className="px-12 pt-5 pb-4">
+  <div className="px-4 pt-5 pb-4">
     {/* content */}
   </div>
 </ScrollArea>
 
 // ✗ Wrong - padding won't reach content
-<ScrollArea className="flex-1 px-12 pt-5 pb-4">
+<ScrollArea className="flex-1 px-4 pt-5 pb-4">
   {/* content */}
 </ScrollArea>
 ```

@@ -14,6 +14,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.3.0] - 2025-12-16
+
+### Added
+- **WorkOS AuthKit Authentication**: Microsoft SSO with @eternal.ag email domain validation
+  - JWT validation using JWKS (local validation, no per-request API calls)
+  - Token caching with 45-second TTL for verified tokens
+  - JWKS caching with 1-hour TTL
+  - AuthGuard, Callback, and UserMenu components
+- **Supabase Storage Backend**: Migrated from JSON files to Supabase PostgreSQL
+  - FK schema design: `conversations` → `messages` → `assistant_responses`
+  - Row Level Security (RLS) policies for user data isolation
+  - Migrated all environments (dev, staging, production)
+- **Test Data Cleanup**: Automatic cleanup in pytest fixtures to prevent database pollution
+- **Progress Indicators**: Real-time model status display during Stage 1
+
+### Changed
+- Storage backend from JSON files to Supabase
+- Authentication from none to WorkOS AuthKit with Microsoft SSO
+
+### Fixed
+- **WorkOS SDK v5.0+ JWT Validation**: Replaced non-existent `get_user_by_access_token()` with local JWT validation using JWKS
+
+### Technical Details
+- JWT validation uses `python-jose` library with RS256 algorithm
+- Supabase tables: `conversations`, `messages`, `assistant_responses`, `conversation_shares`
+- Test user ID pattern: `test_user_{uuid_hex[:8]}`
+
+---
+
+
 ## [1.2.0] - 2025-12-14
 
 ### Added
@@ -87,6 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.3.0 | 2025-12-16 | WorkOS auth, Supabase storage, progress indicators |
 | 1.2.0 | 2025-12-14 | Tailwind v4, shadcn/ui, resizable sidebar |
 | 1.1.0 | 2024-12-13 | SSE streaming, prompt improvement |
 | 1.0.0 | 2024-12-12 | Initial release, 3-stage copilot system |
