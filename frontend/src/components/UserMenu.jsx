@@ -13,17 +13,19 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  useSidebar,
 } from './ui/sidebar'
 import { LogOut, ChevronsUpDown } from 'lucide-react'
 
 /**
  * UserMenu component that displays the current user's information
- * and provides a sign-out button. Designed to work within the
- * shadcn/ui Sidebar component.
+ * and provides a sign-out button. Follows shadcn/ui sidebar-07 nav-user pattern
+ * with dynamic dropdown positioning based on sidebar state.
  */
 export default function UserMenu() {
   const { signOut } = useAuth()
   const user = useCurrentUser()
+  const { isMobile } = useSidebar()
 
   const handleSignOut = () => {
     signOut({ returnTo: window.location.origin })
@@ -56,15 +58,15 @@ export default function UserMenu() {
                 <AvatarFallback className="rounded-lg">{getInitials()}</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                <span className="truncate font-semibold">{user.name}</span>
+                <span className="truncate text-xs">{user.email}</span>
               </div>
               <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-            side="bottom"
+            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={4}
           >
@@ -75,14 +77,14 @@ export default function UserMenu() {
                   <AvatarFallback className="rounded-lg">{getInitials()}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                  <span className="truncate font-semibold">{user.name}</span>
+                  <span className="truncate text-xs">{user.email}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut}>
-              <LogOut className="mr-2 h-4 w-4" />
+              <LogOut />
               Sign Out
             </DropdownMenuItem>
           </DropdownMenuContent>
