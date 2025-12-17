@@ -1,26 +1,47 @@
-# LLM Council
+# LLM Council & AI-Powered DevOps Platform
 
 ![llmcouncil](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+This repository houses the **LLM Council**, a multi-model AI deliberation system, and the **Digital Connections** website, which serves as the frontend for our next-generation **AI-Powered DevOps Platform**.
 
-This enhanced version integrates **Composio MCP Gateway** to provide the council with access to over 500 external tools, enabling them to perform actions and access real-time data during deliberation.
+## Overview
 
-In a bit more detail, here is what happens when you submit a query:
+The core concept is to group multiple advanced LLMs (e.g., GPT-4, Claude 3.5 Sonnet, Gemini 1.5 Pro) into a "Council" that deliberates on complex problems. Instead of relying on a single model, the Council provides diverse perspectives, peer reviews each other's work, and synthesizes a superior final answer.
 
-1.  **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. If Composio is enabled, the prompt includes a list of available tools that the models can use to gather information. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2.  **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3.  **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+We are now evolving this concept into a fully automated DevOps platform where the Council acts as the central intelligence, orchestrating tools, writing code, and managing infrastructure.
 
-## Vibe Code Alert
+### Key Features
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+1.  **Multi-Model Deliberation:**
+    *   **Stage 1:** Individual models provide independent solutions.
+    *   **Stage 2:** Models review and rank each other's solutions (anonymized).
+    *   **Stage 3:** A "Chairman" model synthesizes the final, optimized solution.
+
+2.  **Tool Integration (MCP):**
+    *   Integrated with **Composio/Rube MCP Gateway** to access over 500 external tools (GitHub, Linear, Slack, etc.).
+    *   Enables the Council to perform real-world actions, not just generate text.
+
+3.  **Digital Connections Website:**
+    *   A modern, business-focused frontend for the platform.
+    *   Features a **Chat Interface** to the Council for strategic DevOps consultation.
+    *   Showcases the "Connectedness through Technology" philosophy.
+
+## AI-Powered DevOps Roadmap
+
+We are building a comprehensive, end-to-end DevOps automation platform. See the detailed [**Implementation Plan**](docs/implementation_plan.md) for the full roadmap.
+
+*   **Phase 1:** Customer Request Interface & Foundational Integration (Current Focus)
+*   **Phase 2:** AI-Powered Development Automation (Claude Code Integration)
+*   **Phase 3:** CI/CD and Automated Deployment
+*   **Phase 4:** Monitoring and Automated Remediation
+*   **Phase 5:** Design-to-Code Automation
+*   **Phase 6:** Full Orchestration and Analytics
 
 ## Setup
 
 ### 1. Install Dependencies
 
-**Backend:**
+**Backend (LLM Council):**
 
 ```bash
 cd backend
@@ -28,11 +49,19 @@ pip install -r requirements.txt
 cd ..
 ```
 
-**Frontend:**
+**Frontend (LLM Council Original):**
 
 ```bash
 cd frontend
 npm install
+cd ..
+```
+
+**Digital Connections Website:**
+
+```bash
+cd digital-connections-web
+pnpm install
 cd ..
 ```
 
@@ -44,67 +73,20 @@ Create a `.env` file in the project root by copying the example:
 cp .env.example .env
 ```
 
-Then edit `.env` with your API keys:
+Edit `.env` with your API keys for OpenRouter and Composio.
 
-```bash
-# OpenRouter Configuration
-OPENROUTER_API_KEY=your_openrouter_api_key_here
+### 3. Running the Application
 
-# Composio Configuration (Optional - for tool-augmented deliberation)
-COMPOSIO_API_KEY=your_composio_api_key_here
-COMPOSIO_MCP_SERVER_ID=your_mcp_server_id_here
+**LLM Council (Original):**
+*   Backend: `python -m backend.main`
+*   Frontend: `cd frontend && npm run dev`
 
-# Enable tool-augmented deliberation (set to "true" to enable)
-ENABLE_TOOLS=false
-```
-
--   Get your OpenRouter API key at [openrouter.ai](https://openrouter.ai/).
--   For Composio setup, see the detailed [**Composio Setup Guide**](COMPOSIO_SETUP.md).
-
-### 3. Configure Models (Optional)
-
-Edit `backend/config.py` to customize the council:
-
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-```
-
-## Running the Application
-
-**Option 1: Use the start script**
-
-```bash
-./start.sh
-```
-
-**Option 2: Run manually**
-
-Terminal 1 (Backend):
-
-```bash
-cd backend
-python -m backend.main
-```
-
-Terminal 2 (Frontend):
-
-```bash
-cd frontend
-npm run dev
-```
-
-Then open http://localhost:5173 in your browser.
+**Digital Connections Website:**
+*   `cd digital-connections-web && pnpm dev`
 
 ## Tech Stack
 
--   **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API, Composio SDK
--   **Frontend:** React + Vite, react-markdown for rendering
--   **Storage:** JSON files in `data/conversations/`
--   **Package Management:** pip for Python, npm for JavaScript
+*   **Backend:** FastAPI (Python 3.10+), OpenRouter API, Composio SDK
+*   **Frontend (Web):** React 19, Tailwind CSS 4, Shadcn UI, Framer Motion
+*   **Orchestration:** n8n (planned), Rube MCP Server
+*   **AI Models:** OpenAI, Anthropic, Google, xAI (via OpenRouter)
