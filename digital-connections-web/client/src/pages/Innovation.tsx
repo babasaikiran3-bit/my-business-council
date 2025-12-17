@@ -1,22 +1,27 @@
 import Layout from "@/components/Layout";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { motion } from "framer-motion";
-import { Bot, BrainCircuit, Send, Sparkles, User, Loader2 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Send, Bot, User, Sparkles, Terminal, Cpu, Shield, Zap, Users } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 
 interface Message {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  isLoading?: boolean;
 }
 
 export default function Innovation() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: '1',
+      role: 'assistant',
+      content: "Greetings. I am the **DevOps AI Council** interface. \n\nI can assist you with:\n- **Strategic DevOps Roadmaps**\n- **Infrastructure Automation**\n- **Security & Compliance (DevSecOps)**\n- **AI-Driven Observability**\n\nHow can we accelerate your delivery today?",
+      timestamp: new Date()
+    }
+  ]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -27,11 +32,11 @@ export default function Innovation() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleSend = async () => {
+    if (!input.trim()) return;
 
     const userMessage: Message = {
+      id: Date.now().toString(),
       role: 'user',
       content: input,
       timestamp: new Date()
@@ -39,164 +44,224 @@ export default function Innovation() {
 
     setMessages(prev => [...prev, userMessage]);
     setInput("");
-    setIsLoading(true);
+    setIsTyping(true);
 
-    // Create a placeholder assistant message
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: "",
-      timestamp: new Date(),
-      isLoading: true
-    }]);
+    // Simulate AI processing
+    setTimeout(() => {
+      const response: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: generateResponse(input),
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, response]);
+      setIsTyping(false);
+    }, 1500);
+  };
 
-    // Simulate Phase 1 Chat Response
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const responseContent = `**Phase 1 Analysis:**\n\nI've analyzed your request regarding "${userMessage.content}". \n\nTo optimize your DevOps workflow, I recommend focusing on:\n1. **Automated Testing:** Integrate unit and integration tests into your CI pipeline.\n2. **Infrastructure as Code:** Use Terraform or Ansible to manage your infrastructure.\n3. **Monitoring & Logging:** Implement robust monitoring with Prometheus and Grafana.\n\nThis aligns with the Council's strategic direction for scalable and resilient systems.`;
-
-    setMessages(prev => prev.map((msg, idx) => 
-      idx === prev.length - 1 ? { ...msg, isLoading: false, content: responseContent } : msg
-    ));
-
-    setIsLoading(false);
+  const generateResponse = (query: string): string => {
+    const lowerQuery = query.toLowerCase();
+    if (lowerQuery.includes("security") || lowerQuery.includes("compliance")) {
+      return "### Security Council Deliberation\n\n**Consensus:** Shift security left.\n\n**Recommendation:**\n1. Implement **SAST/DAST** in your CI pipeline.\n2. Enforce **Policy-as-Code** using OPA (Open Policy Agent).\n3. Automate vulnerability scanning for all container images.\n\n*\"Security is not a gate, it's a continuous thread.\"*";
+    }
+    if (lowerQuery.includes("cloud") || lowerQuery.includes("aws") || lowerQuery.includes("azure")) {
+      return "### Infrastructure Council Deliberation\n\n**Consensus:** Adopt immutable infrastructure.\n\n**Recommendation:**\n- Use **Terraform** or **Pulumi** for IaC.\n- Treat servers as cattle, not pets.\n- Implement auto-scaling groups based on custom metrics.\n\n*\"Consistency is the bedrock of reliability.\"*";
+    }
+    return "### Strategic Council Deliberation\n\n**Analysis:** Your query touches on core operational efficiency.\n\n**Recommendation:**\nTo provide a precise roadmap, we recommend a **Value Stream Mapping** session. However, as an immediate step, consider automating your manual handoffs using event-driven architecture.\n\nWould you like to explore **AI-driven incident response** next?";
   };
 
   return (
     <Layout>
-      <div className="flex flex-col min-h-[calc(100vh-80px)] relative">
-        {/* Background Image with Overlay */}
-        <div className="absolute inset-0 z-0">
-          <img 
-            src="/images/innovation-council-v2.png" 
-            alt="Council Background" 
-            className="w-full h-full object-cover opacity-60"
-          />
-          <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
+      {/* Header Section - Standard Layout */}
+      <section className="pt-32 pb-12 relative overflow-hidden">
+        <div className="container px-4 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary mb-6 border border-primary/20"
+          >
+            <Sparkles size={16} />
+            <span className="text-sm font-medium">Phase 1: Strategic Consultation</span>
+          </motion.div>
+          
+          <motion.h1 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-4xl md:text-6xl font-display font-bold mb-6"
+          >
+            DevOps <span className="text-gradient-accent">AI Council</span>
+          </motion.h1>
+          
+          <motion.p 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed"
+          >
+            Engage with our autonomous collective of specialized AI agents to solve complex infrastructure and operational challenges.
+          </motion.p>
         </div>
+      </section>
 
-        {/* Header */}
-        <div className="bg-background/80 backdrop-blur-md border-b border-white/10 p-4 z-10 relative">
-          <div className="container mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                <BrainCircuit size={24} />
-              </div>
-              <div>
-                <h1 className="text-xl font-display font-bold">DevOps AI Council</h1>
-                <p className="text-xs text-muted-foreground">Phase 1: Strategic Consultation</p>
-              </div>
-            </div>
-            <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Online</span>
-            </div>
-          </div>
-        </div>
+      {/* Main Content Area */}
+      <section className="pb-24">
+        <div className="container px-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[800px]">
+            
+            {/* Left Column: Council Visuals & Info */}
+            <div className="lg:col-span-1 flex flex-col gap-6">
+              {/* Council Image Card */}
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3 }}
+                className="glass-panel p-2 rounded-2xl overflow-hidden h-64 relative group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
+                <img 
+                  src="/images/innovation-council-v2.png" 
+                  alt="AI Council Chamber" 
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                />
+                <div className="absolute bottom-4 left-4 z-20">
+                  <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                    <Users size={18} className="text-primary" />
+                    The Council
+                  </h3>
+                  <p className="text-white/70 text-sm">5 Active Agents</p>
+                </div>
+              </motion.div>
 
-        {/* Chat Area */}
-        <div className="flex-1 p-4 md:p-8 relative z-10 pb-24">
-          <div className="container mx-auto max-w-4xl space-y-8">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6">
-                <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                  <Sparkles size={48} className="text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-3xl font-display font-bold mb-2">How can the Council assist you?</h2>
-                  <p className="text-muted-foreground max-w-md mx-auto">
-                    Submit a business challenge or technical query. Our council of AI models will deliberate to inform your DevOps workflow.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
-                  {[
-                    "How can AI improve our CI/CD pipeline?",
-                    "Best practices for microservices security.",
-                    "Strategies for reducing cloud costs.",
-                    "Implementing GitOps for Kubernetes."
-                  ].map((suggestion, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => setInput(suggestion)}
-                      className="p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-primary/30 transition-all text-left text-sm"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              messages.map((msg, index) => (
-                <motion.div 
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  {msg.role === 'assistant' && (
-                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 border border-primary/30">
-                      <Bot size={20} className="text-primary" />
+              {/* Capabilities List */}
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.4 }}
+                className="glass-panel p-6 rounded-2xl flex-1 flex flex-col gap-4"
+              >
+                <h3 className="font-display font-bold text-xl mb-2">Active Modules</h3>
+                
+                {[
+                  { icon: <Terminal size={20} />, label: "Infrastructure as Code", status: "Online" },
+                  { icon: <Shield size={20} />, label: "Security Operations", status: "Active" },
+                  { icon: <Cpu size={20} />, label: "Performance Tuning", status: "Standby" },
+                  { icon: <Zap size={20} />, label: "CI/CD Automation", status: "Online" }
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                    <div className="flex items-center gap-3">
+                      <div className="text-primary">{item.icon}</div>
+                      <span className="font-medium text-sm">{item.label}</span>
                     </div>
-                  )}
-                  
-                  <div className={`max-w-[85%] md:max-w-[75%] space-y-4`}>
-                    <div className={`p-4 rounded-2xl ${
-                      msg.role === 'user' 
-                        ? 'bg-primary text-primary-foreground rounded-tr-none' 
-                        : 'glass-panel border border-white/10 rounded-tl-none'
-                    }`}>
-                      {msg.isLoading ? (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Loader2 size={16} className="animate-spin" />
-                          <span>Consulting the Council...</span>
-                        </div>
-                      ) : (
-                        <div className="prose prose-invert prose-sm max-w-none">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground px-2">
-                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${item.status === 'Standby' ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`} />
+                      <span className="text-xs text-muted-foreground">{item.status}</span>
                     </div>
                   </div>
+                ))}
+              </motion.div>
+            </div>
 
-                  {msg.role === 'user' && (
-                    <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0 border border-white/20">
-                      <User size={20} />
+            {/* Right Column: Chat Interface */}
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 }}
+              className="lg:col-span-2 glass-panel rounded-2xl flex flex-col overflow-hidden border border-white/10 shadow-2xl"
+            >
+              {/* Chat Header */}
+              <div className="p-4 border-b border-white/10 bg-black/20 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary">
+                    <Bot size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm">Council Session #4291</h3>
+                    <p className="text-xs text-muted-foreground">Secure Channel • Encrypted</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50" />
+                  <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50" />
+                  <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50" />
+                </div>
+              </div>
+
+              {/* Messages Area */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-black/20">
+                {messages.map((msg) => (
+                  <motion.div
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      msg.role === 'user' ? 'bg-purple-500/20 text-purple-400' : 'bg-primary/20 text-primary'
+                    }`}>
+                      {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
                     </div>
-                  )}
-                </motion.div>
-              ))
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
+                    
+                    <div className={`max-w-[80%] rounded-2xl p-4 ${
+                      msg.role === 'user' 
+                        ? 'bg-purple-500/10 border border-purple-500/20 text-purple-100' 
+                        : 'bg-white/5 border border-white/10 text-gray-200'
+                    }`}>
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                      <span className="text-[10px] opacity-50 mt-2 block">
+                        {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </motion.div>
+                ))}
+                {isTyping && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex gap-4"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-primary">
+                      <Bot size={16} />
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-1">
+                      <span className="w-2 h-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </motion.div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
 
-        {/* Input Area */}
-        <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-md border-t border-white/10 p-4 z-20">
-          <div className="container mx-auto max-w-4xl">
-            <form onSubmit={handleSendMessage} className="relative">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Consult the Council..."
-                className="pr-12 h-14 rounded-2xl bg-white/5 border-white/10 focus:border-primary/50 text-lg shadow-lg"
-                disabled={isLoading}
-              />
-              <Button 
-                type="submit" 
-                size="icon"
-                disabled={!input.trim() || isLoading}
-                className="absolute right-2 top-2 h-10 w-10 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
-              >
-                {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-              </Button>
-            </form>
-            <p className="text-center text-xs text-muted-foreground mt-3">
-              Phase 1: Initial Strategic Consultation. Future phases will include multi-model deliberation.
-            </p>
+              {/* Input Area */}
+              <div className="p-4 border-t border-white/10 bg-black/40">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    placeholder="Ask the council about your DevOps strategy..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50"
+                  />
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+                <p className="text-center text-[10px] text-muted-foreground mt-3">
+                  AI Council responses are simulated for Phase 1. Strategic advice should be verified by human experts.
+                </p>
+              </div>
+            </motion.div>
           </div>
         </div>
-      </div>
+      </section>
     </Layout>
   );
 }
