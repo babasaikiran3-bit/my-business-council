@@ -28,9 +28,17 @@ function App() {
  */
 function AuthenticatedApp() {
   const [activeFeature, setActiveFeature] = useState('home');
+  // Navigation params for features (e.g., conversationId from search)
+  const [featureParams, setFeatureParams] = useState({});
 
-  const handleFeatureChange = (featureId) => {
+  /**
+   * Handle feature navigation with optional params.
+   * @param {string} featureId - The feature to navigate to
+   * @param {Object} params - Optional params to pass to the feature
+   */
+  const handleFeatureChange = (featureId, params = {}) => {
     setActiveFeature(featureId);
+    setFeatureParams(params);
   };
 
   const renderFeature = () => {
@@ -38,7 +46,7 @@ function AuthenticatedApp() {
       case 'home':
         return <HomeFeature onNavigate={handleFeatureChange} />;
       case 'copilot':
-        return <CopilotFeature />;
+        return <CopilotFeature initialConversationId={featureParams.conversationId} />;
       case 'analytics':
         return <PlaceholderFeature title="Analytics" description="Monitor AI usage and performance metrics." />;
       case 'reports':

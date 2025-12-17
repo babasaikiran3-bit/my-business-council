@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAuth } from '@workos-inc/authkit-react'
 import { toast } from 'sonner'
 import { api } from '../../api'
 import { isConnectionError } from '@/contexts/ConnectionErrorContext'
@@ -9,9 +8,13 @@ import ChatInterface from '../ChatInterface'
 /**
  * CopilotFeature - The 3-stage LLM deliberation feature.
  * This wraps the existing Copilot functionality for use within the dashboard.
+ *
+ * Note: Token getter is set in AuthGuard for all authenticated components.
+ *
+ * @param {Object} props
+ * @param {string} props.initialConversationId - Optional conversation ID to load on mount (from search)
  */
-export default function CopilotFeature() {
-  const { getAccessToken } = useAuth()
+export default function CopilotFeature({ initialConversationId }) {
 
   const [conversations, setConversations] = useState([])
   const [currentConversationId, setCurrentConversationId] = useState(null)
@@ -50,11 +53,6 @@ export default function CopilotFeature() {
     (timing) => timing.startTime && !timing.completed
   )
 
-  // Set auth token getter for API calls
-  useEffect(() => {
-    api.setTokenGetter(getAccessToken)
-  }, [getAccessToken])
-
   // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true
@@ -73,6 +71,13 @@ export default function CopilotFeature() {
   useEffect(() => {
     loadConversations()
   }, [])
+
+  // Handle initial conversation ID from search navigation
+  useEffect(() => {
+    if (initialConversationId) {
+      setCurrentConversationId(initialConversationId)
+    }
+  }, [initialConversationId])
 
   // Load conversation details when selected
   useEffect(() => {

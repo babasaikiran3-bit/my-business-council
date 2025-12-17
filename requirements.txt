@@ -13,3 +13,6 @@ cachetools>=5.3.0
 slowapi>=0.1.9
 python-jose[cryptography]>=3.5.0
 
+# Typesense Search
+typesense>=0.21.0
+

@@ -327,6 +327,25 @@ export const api = {
   },
 
   /**
+   * Get a scoped Typesense search key for the authenticated user.
+   * The key has user_id filtering embedded at the Typesense level.
+   * @returns {Promise<{search_key: string, typesense_host: string, typesense_port: string, typesense_protocol: string}>}
+   */
+  async getSearchKey() {
+    const response = await this.fetchWithRetry(`${API_BASE}/api/search/key`);
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+      if (response.status === 503) {
+        throw new Error('Search is not configured.');
+      }
+      throw new Error('Failed to get search key');
+    }
+    return response.json();
+  },
+
+  /**
    * Improve a prompt using an LLM.
    */
   async improvePrompt(content) {

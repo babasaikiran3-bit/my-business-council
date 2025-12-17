@@ -25,23 +25,83 @@ from .copilot import (
     improve_user_prompt,
     get_copilot_models,
 )
+from .search import (
+    generate_scoped_search_key,
+    is_typesense_configured,
+)
+from .config import (
+    TYPESENSE_HOST,
+    TYPESENSE_API_KEY,
+    TYPESENSE_SEARCH_ONLY_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Eternal Copilot API")
 
-# Check WorkOS configuration on startup
-if not WORKOS_API_KEY or not WORKOS_CLIENT_ID:
-    logger.critical(
-        "CRITICAL: WorkOS credentials not configured. "
-        "Set WORKOS_API_KEY and WORKOS_CLIENT_ID environment variables. "
-        "All authenticated endpoints will return 500 errors until configured."
-    )
-    print(
-        "\n⚠️  WARNING: WorkOS authentication is NOT configured!\n"
-        "   Set WORKOS_API_KEY and WORKOS_CLIENT_ID in your .env file.\n"
-        "   All API endpoints requiring authentication will return 500 errors.\n"
-    )
+def _check_required_configuration():
+    """
+    Check that all required services are configured on startup.
+    Raises an exception if critical configuration is missing.
+    """
+    missing_vars = []
+
+    # Check WorkOS configuration (required for authentication)
+    if not WORKOS_API_KEY:
+        missing_vars.append("WORKOS_API_KEY")
+    if not WORKOS_CLIENT_ID:
+        missing_vars.append("WORKOS_CLIENT_ID")
+
+    # Check Typesense configuration (required for search)
+    if not TYPESENSE_HOST:
+        missing_vars.append("TYPESENSE_HOST")
+    if not TYPESENSE_API_KEY:
+        missing_vars.append("TYPESENSE_API_KEY")
+    if not TYPESENSE_SEARCH_ONLY_KEY:
+        missing_vars.append("TYPESENSE_SEARCH_ONLY_KEY")
+
+    if missing_vars:
+        error_message = (
+            "\n"
+            "=" * 60 + "\n"
+            "❌ CONFIGURATION ERROR: Required environment variables missing\n"
+            "=" * 60 + "\n"
+            f"\nMissing variables:\n"
+        )
+        for var in missing_vars:
+            error_message += f"  • {var}\n"
+
+        error_message += (
+            "\n"
+            "How to fix:\n"
+            "  1. Copy the appropriate .env file for your environment:\n"
+            "     - Development: .env.development\n"
+            "     - Staging: .env.staging\n"
+            "     - Production: .env.production\n"
+            "\n"
+            "  2. Ensure all required variables are set:\n"
+            "\n"
+            "     WorkOS Authentication:\n"
+            "       WORKOS_API_KEY=sk_test_...\n"
+            "       WORKOS_CLIENT_ID=client_...\n"
+            "\n"
+            "     Typesense Cloud (https://cloud.typesense.org/):\n"
+            "       TYPESENSE_HOST=xxx.a1.typesense.net\n"
+            "       TYPESENSE_API_KEY=your-admin-api-key\n"
+            "       TYPESENSE_SEARCH_ONLY_KEY=your-search-only-key\n"
+            "\n"
+            "  3. Restart the application after updating environment variables.\n"
+            "\n"
+            "=" * 60 + "\n"
+        )
+
+        logger.critical(error_message)
+        raise RuntimeError(error_message)
+
+
+# Validate required configuration on startup
+_check_required_configuration()
+
+app = FastAPI(title="Eternal Copilot API")
 
 # Enable CORS - uses ALLOWED_ORIGINS from config (defaults to localhost for development)
 app.add_middleware(
@@ -89,6 +149,41 @@ class Conversation(BaseModel):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "Eternal Copilot API"}
+
+
+@app.get("/api/search/key")
+async def get_search_key(user: AuthenticatedUser = Depends(get_current_user)):
+    """
+    Get a scoped Typesense API key for the authenticated user.
+
+    The returned key has the user_id filter embedded at the Typesense level,
+    ensuring the user can only search their own data. The key expires after 1 hour.
+
+    Returns:
+        JSON with search_key, typesense_host, and typesense_port for client configuration.
+    """
+    if not is_typesense_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Search is not configured. Contact your administrator."
+        )
+
+    try:
+        from .config import TYPESENSE_HOST, TYPESENSE_PORT, TYPESENSE_PROTOCOL
+
+        scoped_key = generate_scoped_search_key(user.id)
+        return {
+            "search_key": scoped_key,
+            "typesense_host": TYPESENSE_HOST,
+            "typesense_port": TYPESENSE_PORT,
+            "typesense_protocol": TYPESENSE_PROTOCOL,
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate search key: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate search key"
+        )
 
 
 @app.post("/api/improve-prompt")

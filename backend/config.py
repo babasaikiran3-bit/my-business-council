@@ -92,6 +92,14 @@ PROMPT_IMPROVER_MODEL = "google/gemini-3-pro-preview"
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Typesense Cloud Configuration
+# Get these values from Typesense Cloud dashboard: https://cloud.typesense.org/
+TYPESENSE_HOST = os.getenv("TYPESENSE_HOST", "")  # e.g., "xyz.a1.typesense.net"
+TYPESENSE_PORT = os.getenv("TYPESENSE_PORT", "443")
+TYPESENSE_PROTOCOL = os.getenv("TYPESENSE_PROTOCOL", "https")
+TYPESENSE_API_KEY = os.getenv("TYPESENSE_API_KEY", "")  # Admin API key for indexing
+TYPESENSE_SEARCH_ONLY_KEY = os.getenv("TYPESENSE_SEARCH_ONLY_KEY", "")  # Search-only key for scoped keys
+
 # Data directory for conversation storage
 # Use /tmp for Vercel serverless functions, otherwise use local directory
 IS_VERCEL = os.getenv("VERCEL", "false").lower() == "1" or os.getenv("VERCEL_ENV") is not None

@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { useAuth } from '@workos-inc/authkit-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
 import { AlertTriangle } from 'lucide-react'
+import { api } from '@/api'
 
 /**
  * Error component shown when authentication is not configured.
@@ -36,7 +38,16 @@ export function AuthConfigError() {
  * Always requires authentication - no bypass logic.
  */
 export function AuthGuard({ children }) {
-  const { isLoading, user, signIn } = useAuth()
+  const { isLoading, user, signIn, getAccessToken } = useAuth()
+
+  // Set up the token getter for the API client when authenticated
+  // This must happen at the AuthGuard level so all child components
+  // (including GlobalSearch in DashboardHeader) can make authenticated API calls
+  useEffect(() => {
+    if (getAccessToken) {
+      api.setTokenGetter(getAccessToken)
+    }
+  }, [getAccessToken])
 
   if (isLoading) {
     return (

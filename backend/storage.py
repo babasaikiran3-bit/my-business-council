@@ -13,6 +13,10 @@ The FK design provides:
 - Explicit 1:1 relationship between user messages and assistant responses
 - Data integrity via foreign key constraints with CASCADE delete
 - Clean separation of user queries from AI responses
+
+Search Integration:
+- All CRUD operations automatically sync to Typesense for full-text search
+- Indexing is done asynchronously to not block the main request
 """
 
 import logging
@@ -39,6 +43,67 @@ def get_supabase_client() -> Client:
             )
         _supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     return _supabase_client
+
+
+# =============================================================================
+# Search Indexing Helpers
+# =============================================================================
+
+
+def _safe_index_conversation(conversation: Dict[str, Any]) -> None:
+    """Safely index a conversation to Typesense (non-blocking, logs errors)."""
+    try:
+        from .search import index_conversation, is_typesense_configured
+
+        if is_typesense_configured():
+            index_conversation(conversation)
+            logger.debug(f"Indexed conversation {conversation['id']} to Typesense")
+    except Exception as e:
+        # Log but don't fail - search indexing should not block storage operations
+        logger.warning(f"Failed to index conversation to Typesense: {e}")
+
+
+def _safe_index_message(message: Dict[str, Any], user_id: str) -> None:
+    """Safely index a message to Typesense (non-blocking, logs errors)."""
+    try:
+        from .search import index_message, is_typesense_configured
+
+        if is_typesense_configured():
+            index_message(message, user_id)
+            logger.debug(f"Indexed message {message['id']} to Typesense")
+    except Exception as e:
+        # Log but don't fail - search indexing should not block storage operations
+        logger.warning(f"Failed to index message to Typesense: {e}")
+
+
+def _safe_update_conversation_in_index(
+    conversation_id: str, updates: Dict[str, Any]
+) -> None:
+    """Safely update a conversation in Typesense (non-blocking, logs errors).
+
+    Note: user_id is not needed here because:
+    1. The document was created with the correct user_id
+    2. We're only updating fields like title/original_query
+    3. user_id should never change after creation
+    """
+    try:
+        from .search import get_typesense_client, is_typesense_configured
+
+        if is_typesense_configured():
+            client = get_typesense_client()
+            # Typesense upsert with partial update
+            client.collections["conversations"].documents[conversation_id].update(
+                updates
+            )
+            logger.debug(f"Updated conversation {conversation_id} in Typesense")
+    except Exception as e:
+        # Log but don't fail
+        logger.warning(f"Failed to update conversation in Typesense: {e}")
+
+
+# =============================================================================
+# Conversation CRUD Operations
+# =============================================================================
 
 
 def create_conversation(
@@ -75,6 +140,10 @@ def create_conversation(
         raise RuntimeError(f"Failed to create conversation: {result}")
 
     row = result.data[0]
+
+    # Index to Typesense for search
+    _safe_index_conversation(row)
+
     return {
         "id": row["id"],
         "user_id": row["user_id"],
@@ -285,6 +354,11 @@ def add_user_message(conversation_id: str, user_id: str, content: str) -> str:
     supabase.table("conversations").update(
         {"updated_at": datetime.now(timezone.utc).isoformat()}
     ).eq("id", conversation_id).execute()
+
+    # Index message to Typesense for search
+    message_row = result.data[0]
+    message_row["conversation_id"] = conversation_id  # Ensure it's included
+    _safe_index_message(message_row, user_id)
 
     return result.data[0]["id"]
 
@@ -516,6 +590,9 @@ def update_conversation_title(conversation_id: str, user_id: str, title: str):
     if not result.data:
         raise ValueError(f"Conversation {conversation_id} not found")
 
+    # Update Typesense index
+    _safe_update_conversation_in_index(conversation_id, {"title": title})
+
 
 def update_conversation_queries(
     conversation_id: str,
@@ -553,3 +630,9 @@ def update_conversation_queries(
 
     if not result.data:
         raise ValueError(f"Conversation {conversation_id} not found")
+
+    # Update Typesense index with original_query (searchable field)
+    if original_query is not None:
+        _safe_update_conversation_in_index(
+            conversation_id, {"original_query": original_query}
+        )
