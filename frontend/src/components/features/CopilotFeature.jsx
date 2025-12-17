@@ -17,6 +17,7 @@ export default function CopilotFeature() {
   const [currentConversationId, setCurrentConversationId] = useState(null)
   const [currentConversation, setCurrentConversation] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
 
   // Error state for current conversation with retry info
   const [currentError, setCurrentError] = useState(null)
@@ -142,6 +143,7 @@ export default function CopilotFeature() {
   }
 
   const loadConversations = async () => {
+    setIsLoadingConversations(true)
     try {
       const convs = await api.listConversations()
       setConversations(convs)
@@ -151,6 +153,8 @@ export default function CopilotFeature() {
       if (!isConnectionError(error)) {
         toast.error('Failed to load conversations')
       }
+    } finally {
+      setIsLoadingConversations(false)
     }
   }
 
@@ -442,6 +446,7 @@ export default function CopilotFeature() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        isLoadingConversations={isLoadingConversations}
       />
       <ChatInterface
         conversation={currentConversation}

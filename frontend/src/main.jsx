@@ -71,9 +71,8 @@ if (!WORKOS_CLIENT_ID) {
             // The SDK will automatically show the sign-in screen via AuthGuard
           }}
         >
-          {/* Connect API client to connection error context */}
           <ApiConnectionHandler>
-            {/* Connection error banner - shown when backend is unavailable */}
+            {/* Connection error banner - displays at top when backend is unavailable */}
             <ConnectionErrorBanner />
             {/* Use RouterProvider instead of BrowserRouter to support useBlocker hook */}
             <RouterProvider router={router} />

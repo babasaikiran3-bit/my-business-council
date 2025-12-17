@@ -36,6 +36,37 @@ function formatTimestamp(isoString) {
 }
 
 /**
+ * Skeleton loader for conversation list items.
+ * Displays animated placeholder items while conversations are loading.
+ */
+function ConversationSkeleton() {
+  return (
+    <div className="space-y-1">
+      {[1, 2, 3, 4].map((i) => (
+        <div
+          key={i}
+          className="w-full px-3 py-2 rounded-md animate-pulse"
+        >
+          <div className="flex items-start gap-2">
+            {/* Icon skeleton */}
+            <div className="h-4 w-4 mt-0.5 rounded bg-zinc-200 shrink-0" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              {/* Title skeleton - varying widths for visual interest */}
+              <div
+                className="h-3 rounded bg-zinc-200"
+                style={{ width: `${60 + (i % 3) * 15}%` }}
+              />
+              {/* Meta skeleton */}
+              <div className="h-2.5 w-16 rounded bg-zinc-100" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
  * ConversationSidebar - Secondary sidebar for managing Copilot conversations.
  * Displays within the main content area of the dashboard.
  */
@@ -45,6 +76,7 @@ export default function ConversationSidebar({
   onSelectConversation,
   onNewConversation,
   processingConversations = new Map(),
+  isLoadingConversations = false,
 }) {
   return (
     <div className="w-64 border-r bg-muted/30 flex flex-col h-full shrink-0">
@@ -59,7 +91,9 @@ export default function ConversationSidebar({
 
       {/* Conversation list - native scrolling for reliability */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2">
-          {conversations.length === 0 ? (
+          {isLoadingConversations ? (
+            <ConversationSkeleton />
+          ) : conversations.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
               No conversations yet
             </div>
