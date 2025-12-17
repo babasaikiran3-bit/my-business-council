@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@workos-inc/authkit-react'
 import { toast } from 'sonner'
 import { api } from '../../api'
+import { isConnectionError } from '@/contexts/ConnectionErrorContext'
 import ConversationSidebar from './copilot/ConversationSidebar'
 import ChatInterface from '../ChatInterface'
 
@@ -146,7 +147,10 @@ export default function CopilotFeature() {
       setConversations(convs)
     } catch (error) {
       console.error('Failed to load conversations:', error)
-      toast.error('Failed to load conversations')
+      // Skip toast for connection errors - the ConnectionErrorBanner handles those
+      if (!isConnectionError(error)) {
+        toast.error('Failed to load conversations')
+      }
     }
   }
 
@@ -156,7 +160,10 @@ export default function CopilotFeature() {
       setCurrentConversation(conv)
     } catch (error) {
       console.error('Failed to load conversation:', error)
-      toast.error('Failed to load conversation')
+      // Skip toast for connection errors - the ConnectionErrorBanner handles those
+      if (!isConnectionError(error)) {
+        toast.error('Failed to load conversation')
+      }
     }
   }
 
@@ -172,7 +179,10 @@ export default function CopilotFeature() {
       toast.success('New conversation created')
     } catch (error) {
       console.error('Failed to create conversation:', error)
-      toast.error('Failed to create conversation')
+      // Skip toast for connection errors - the ConnectionErrorBanner handles those
+      if (!isConnectionError(error)) {
+        toast.error('Failed to create conversation')
+      }
     }
   }
 
@@ -262,7 +272,10 @@ export default function CopilotFeature() {
           ...prev,
           messages: prev.messages.slice(0, -2),
         }))
-        toast.error('Failed to send message. Please try again.')
+        // Skip toast for connection errors - the ConnectionErrorBanner handles those
+        if (!isConnectionError(error)) {
+          toast.error('Failed to send message. Please try again.')
+        }
         setIsLoading(false)
       }
       streamControllerRef.current = null

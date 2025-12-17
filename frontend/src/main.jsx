@@ -7,6 +7,9 @@ import { onCLS, onFCP, onLCP, onTTFB } from 'web-vitals'
 import './index.css'
 import App from './App.jsx'
 import { AuthConfigError } from './components/AuthGuard'
+import { ConnectionErrorProvider } from './contexts/ConnectionErrorContext'
+import { ConnectionErrorBanner } from './components/ConnectionErrorBanner'
+import { ApiConnectionHandler } from './components/ApiConnectionHandler'
 
 // Create a data router to support useBlocker hook for navigation blocking
 // This is required for React Router v6.4+ features like useBlocker
@@ -54,24 +57,31 @@ if (!WORKOS_CLIENT_ID) {
   // - Access token duration: 5-15 minutes (short for security, auto-refreshed)
   createRoot(document.getElementById('root')).render(
     <StrictMode>
-      <AuthKitProvider
-        clientId={WORKOS_CLIENT_ID}
-        redirectUri={WORKOS_REDIRECT_URI}
-        // Refresh tokens 60 seconds before they expire to ensure seamless session continuity
-        // This prevents any gap where the user might be logged out momentarily
-        refreshBufferInterval={60}
-        // Optional: Handle refresh failures (e.g., session expired server-side)
-        onRefreshFailure={(error) => {
-          console.error('Session refresh failed:', error.message)
-          // Session has expired or been revoked - user will need to sign in again
-          // The SDK will automatically show the sign-in screen via AuthGuard
-        }}
-      >
-        {/* Use RouterProvider instead of BrowserRouter to support useBlocker hook */}
-        <RouterProvider router={router} />
-        {/* Toast notification container - positioned top-right with rich color styling */}
-        <Toaster position="top-right" richColors closeButton />
-      </AuthKitProvider>
+      <ConnectionErrorProvider>
+        <AuthKitProvider
+          clientId={WORKOS_CLIENT_ID}
+          redirectUri={WORKOS_REDIRECT_URI}
+          // Refresh tokens 60 seconds before they expire to ensure seamless session continuity
+          // This prevents any gap where the user might be logged out momentarily
+          refreshBufferInterval={60}
+          // Optional: Handle refresh failures (e.g., session expired server-side)
+          onRefreshFailure={(error) => {
+            console.error('Session refresh failed:', error.message)
+            // Session has expired or been revoked - user will need to sign in again
+            // The SDK will automatically show the sign-in screen via AuthGuard
+          }}
+        >
+          {/* Connect API client to connection error context */}
+          <ApiConnectionHandler>
+            {/* Connection error banner - shown when backend is unavailable */}
+            <ConnectionErrorBanner />
+            {/* Use RouterProvider instead of BrowserRouter to support useBlocker hook */}
+            <RouterProvider router={router} />
+            {/* Toast notification container - positioned top-right with rich color styling */}
+            <Toaster position="top-right" richColors closeButton />
+          </ApiConnectionHandler>
+        </AuthKitProvider>
+      </ConnectionErrorProvider>
     </StrictMode>,
   )
 }

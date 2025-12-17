@@ -1,6 +1,17 @@
 /**
- * API client for the Eternal Copilot backend with WorkOS authentication.
- * Includes automatic token refresh and retry on 401 responses.
+ * API client for the Eternal Ops Control backend.
+ *
+ * Features:
+ * - WorkOS authentication with automatic token refresh on 401 responses
+ * - Connection error detection for backend unavailability
+ * - Health check endpoint for proactive connectivity monitoring
+ * - SSE streaming support with connection error handling
+ *
+ * Connection Error Flow:
+ * 1. ApiConnectionHandler sets callback via setConnectionErrorCallback()
+ * 2. API calls detect network failures via isConnectionError()
+ * 3. reportConnectionError() invokes callback with error details
+ * 4. ConnectionErrorContext updates state, triggering UI banner display
  */
 
 // Use environment variable for API base URL, fallback to localhost for development
@@ -9,11 +20,91 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || (
   import.meta.env.PROD ? '' : 'http://localhost:8001'
 );
 
+// Token getter function from WorkOS AuthKit's useAuth hook
 let getAccessToken = null;
 
 // Track if we're currently refreshing to prevent multiple refresh attempts
 let isRefreshing = false;
 let refreshPromise = null;
+
+// Connection error callback - bridges API client to React context for UI display
+let connectionErrorCallback = null;
+
+/**
+ * Check if an error indicates a connection/network problem.
+ *
+ * Distinguishes between:
+ * - Connection errors (server down, network issues) → Show connection banner
+ * - Auth errors (401, 403) → Handled by auth flow
+ * - Validation errors (400, 422) → Show inline error messages
+ *
+ * @param {Error} error - The error to check
+ * @returns {boolean} True if this is a connection error that should trigger the banner
+ */
+function isConnectionError(error) {
+  // TypeError with 'fetch' - common when server is unreachable
+  if (error instanceof TypeError && error.message.includes('fetch')) {
+    return true;
+  }
+
+  // Explicit network error message
+  if (error.message?.toLowerCase().includes('network')) {
+    return true;
+  }
+
+  // "Failed to fetch" - browser's generic network failure message
+  if (error.message?.toLowerCase().includes('failed to fetch')) {
+    return true;
+  }
+
+  // Connection refused - server not running
+  if (error.message?.toLowerCase().includes('connection refused')) {
+    return true;
+  }
+
+  // CORS errors can indicate server is down (no response to preflight)
+  if (error.message?.toLowerCase().includes('cors')) {
+    return true;
+  }
+
+  // Chrome-style error codes (ERR_CONNECTION_REFUSED, etc.)
+  if (error.message?.toLowerCase().includes('err_connection')) {
+    return true;
+  }
+
+  // Safari's "Load failed" message for network errors
+  if (error.message?.toLowerCase().includes('load failed')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if an HTTP status code indicates a server-side connection issue
+ * @param {number} status - HTTP status code
+ * @returns {boolean} True if this is a server error
+ */
+function isServerError(status) {
+  return status >= 500 && status < 600;
+}
+
+/**
+ * Report a connection error through the registered callback.
+ *
+ * This function bridges the API client to the React UI by invoking the callback
+ * set by ApiConnectionHandler. The callback updates ConnectionErrorContext state,
+ * which triggers the ConnectionErrorBanner to display.
+ *
+ * @param {string} type - Error type from CONNECTION_ERROR_TYPES (e.g., 'NETWORK_ERROR')
+ * @param {string} message - User-friendly error message to display in the banner
+ * @param {Function} retryFn - Optional async function to retry the failed operation
+ */
+function reportConnectionError(type, message, retryFn = null) {
+  if (connectionErrorCallback) {
+    connectionErrorCallback({ type, message, retryFn });
+  }
+}
 
 export const api = {
   /**
@@ -22,6 +113,58 @@ export const api = {
    */
   setTokenGetter(tokenGetter) {
     getAccessToken = tokenGetter;
+  },
+
+  /**
+   * Set the connection error callback for reporting backend unavailability.
+   *
+   * Called by ApiConnectionHandler on mount to connect the API client to the
+   * ConnectionErrorContext. When connection errors occur, the callback is invoked
+   * to update React state and display the error banner.
+   *
+   * @param {Function|null} callback - Function to call with { type, message, retryFn }
+   */
+  setConnectionErrorCallback(callback) {
+    connectionErrorCallback = callback;
+  },
+
+  /**
+   * Check if the backend server is available.
+   *
+   * This is a lightweight health check that:
+   * - Runs immediately on app mount (triggered by ApiConnectionHandler)
+   * - Does NOT require authentication (hits the root / endpoint)
+   * - Uses AbortController for timeout (5 seconds) for browser compatibility
+   *   (AbortSignal.timeout() is not supported in older browsers)
+   * - Reports connection errors to trigger the UI banner
+   *
+   * @returns {Promise<boolean>} True if server is available, false otherwise
+   */
+  async checkHealth() {
+    // AbortController with manual timeout for broader browser compatibility
+    // (AbortSignal.timeout() is newer and less supported)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const response = await fetch(`${API_BASE}/`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (isConnectionError(error)) {
+        const retryFn = () => this.checkHealth();
+        reportConnectionError(
+          'NETWORK_ERROR',
+          'Dashboard has lost connection to the server. Please check that the backend is running.',
+          retryFn
+        );
+      }
+      return false;
+    }
   },
 
   /**
@@ -64,18 +207,49 @@ export const api = {
   },
 
   /**
-   * Make a fetch request with automatic 401 retry.
+   * Make a fetch request with automatic 401 retry and connection error detection.
    * If a 401 is received, refreshes the token and retries once.
+   * If a network/connection error occurs, reports it via the callback.
    */
   async fetchWithRetry(url, options = {}, retryCount = 0) {
     const authHeaders = await this.getAuthHeaders();
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers,
-        ...authHeaders,
-      },
-    });
+
+    let response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers: {
+          ...options.headers,
+          ...authHeaders,
+        },
+      });
+    } catch (error) {
+      // Check if this is a connection/network error
+      if (isConnectionError(error)) {
+        console.error('Connection error detected:', error.message);
+        // Create a retry function that will re-attempt this request
+        const retryFn = () => this.fetchWithRetry(url, options, 0);
+        reportConnectionError(
+          'NETWORK_ERROR',
+          'Dashboard has lost connection to the server. Please check that the backend is running.',
+          retryFn
+        );
+      }
+      throw error;
+    }
+
+    // Check for server errors (5xx) which may indicate server issues
+    if (isServerError(response.status)) {
+      console.error(`Server error: ${response.status}`);
+      const retryFn = () => this.fetchWithRetry(url, options, 0);
+      reportConnectionError(
+        'SERVER_ERROR',
+        `Server error (${response.status}). The server may be experiencing issues.`,
+        retryFn
+      );
+      // Still return the response so the caller can handle it
+      return response;
+    }
 
     // If 401 and haven't retried yet, refresh token and retry once
     if (response.status === 401 && retryCount < 1) {
@@ -225,10 +399,24 @@ export const api = {
       fetchOptions.signal = signal;
     }
 
-    let response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      fetchOptions
-    );
+    let response;
+    try {
+      response = await fetch(
+        `${API_BASE}/api/conversations/${conversationId}/message/stream`,
+        fetchOptions
+      );
+    } catch (error) {
+      // Check if this is a connection/network error (not an abort)
+      if (error.name !== 'AbortError' && isConnectionError(error)) {
+        console.error('SSE connection error detected:', error.message);
+        reportConnectionError(
+          'NETWORK_ERROR',
+          'Dashboard has lost connection to the server. Please check that the backend is running.',
+          null
+        );
+      }
+      throw error;
+    }
 
     // Handle 401 with token refresh for SSE
     if (response.status === 401) {
@@ -245,9 +433,31 @@ export const api = {
       if (signal) {
         retryOptions.signal = signal;
       }
-      response = await fetch(
-        `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-        retryOptions
+      try {
+        response = await fetch(
+          `${API_BASE}/api/conversations/${conversationId}/message/stream`,
+          retryOptions
+        );
+      } catch (error) {
+        if (error.name !== 'AbortError' && isConnectionError(error)) {
+          console.error('SSE retry connection error:', error.message);
+          reportConnectionError(
+            'NETWORK_ERROR',
+            'Dashboard has lost connection to the server. Please check that the backend is running.',
+            null
+          );
+        }
+        throw error;
+      }
+    }
+
+    // Check for server errors
+    if (isServerError(response.status)) {
+      console.error(`SSE server error: ${response.status}`);
+      reportConnectionError(
+        'SERVER_ERROR',
+        `Server error (${response.status}). The server may be experiencing issues.`,
+        null
       );
     }
 
