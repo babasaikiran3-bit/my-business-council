@@ -178,6 +178,165 @@ def cleanup_test_data(test_user_id):
 
 **Test User ID Pattern**: `test_user_{uuid_hex[:8]}` (e.g., `test_user_409b4ae3`)
 
+### Typesense Search Integration (December 2024)
+
+**Full-text search integration using Typesense Cloud for instant conversation/message search.**
+
+**Architecture Overview**:
+- **Backend**: `backend/search.py` manages client initialization, collection schemas, and scoped API key generation
+- **Frontend**: `frontend/src/components/GlobalSearch.jsx` provides search UI with TypesenseInstantSearchAdapter
+- **Security**: Scoped API keys with embedded `user_id` filter prevent cross-user data access
+
+**Collection Schemas**:
+| Collection | Searchable Fields | Security |
+|------------|-------------------|----------|
+| `conversations` | id, title, original_query, created_at, source | `user_id` (facet) |
+| `messages` | id, conversation_id, content, created_at, source | `user_id` (facet) |
+| `zep_memories` | id, content, memory_type, created_at, source | `user_id` (facet) |
+
+**Environment Variables** (all in root `.env.*` files):
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `TYPESENSE_HOST` | Yes | Typesense Cloud hostname | `y4nhrpvekb3i76owp-1.a1.typesense.net` |
+| `TYPESENSE_PORT` | Yes | API port (443 for HTTPS) | `443` |
+| `TYPESENSE_PROTOCOL` | Yes | Connection protocol | `https` |
+| `TYPESENSE_API_KEY` | Yes | Admin API key (write access) | From Typesense Cloud |
+| `TYPESENSE_SEARCH_ONLY_KEY` | Yes | Search-only key (read access) | From Typesense Cloud |
+
+**Migration Commands for New Environments**:
+```bash
+# 1. Initialize collections (creates schemas)
+python -m backend.search init
+
+# 2. Sync existing data from Supabase
+python -m backend.search sync
+
+# 3. Verify setup (optional)
+python -c "
+from backend.search import get_typesense_client
+client = get_typesense_client()
+for name in ['conversations', 'messages', 'zep_memories']:
+    info = client.collections[name].retrieve()
+    print(f'{name}: {info[\"num_documents\"]} documents')
+"
+```
+
+**API Endpoints**:
+- `GET /api/search/key` - Returns scoped search key for authenticated user (protected by WorkOS auth)
+
+**Scoped API Key Security**:
+```python
+# Scoped key embeds user_id filter at Typesense level
+scoped_key = client.keys.generate_scoped_search_key(
+    search_key=TYPESENSE_SEARCH_ONLY_KEY,
+    key_parameters={
+        "filter_by": f"user_id:={user_id}",  # Cannot be bypassed by client
+        "expires_at": int(time.time()) + 3600,  # 1-hour expiry
+    }
+)
+```
+
+**Real-time Indexing**:
+- `create_conversation()` → auto-indexes to `conversations` collection
+- `add_user_message()` → auto-indexes to `messages` collection
+- `update_conversation_title()` / `update_conversation_queries()` → updates index
+- All indexing operations are non-blocking (failures logged, don't block storage)
+
+**Graceful Degradation**:
+- If Typesense is unavailable, storage operations continue normally
+- Frontend shows "Search not configured" instead of crashing
+- All indexing uses try/catch with warning logs
+
+### Typesense Code Review Fixes (December 2024)
+
+**Bug Fixes Applied During Code Review**:
+
+1. **User Switch Cache Invalidation**:
+   - **Problem**: Module-level adapter cache retained previous user's scoped key after sign-out/sign-in
+   - **Solution**: Added `adapterUserId` tracking and `resetAdapterCache()` function; cache resets when `user?.id` changes
+   - **File**: `frontend/src/components/GlobalSearch.jsx`
+
+2. **401 Error Recovery**:
+   - **Problem**: Expired/invalid scoped keys returned empty results without refreshing
+   - **Solution**: Added error detection in `performSearch()` that resets cache on 401/403 responses
+   - **File**: `frontend/src/components/GlobalSearch.jsx`
+
+3. **Typesense SDK v29+ Breaking Change**:
+   - **Problem**: `generate_scoped_search_key()` parameter renamed from `parameters` to `key_parameters`
+   - **Problem**: Return type changed from `str` to `bytes`
+   - **Solution**: Updated parameter name and added `bytes.decode("utf-8")` conversion
+   - **File**: `backend/search.py`
+
+4. **Unused Code Cleanup**:
+   - Removed unused `useNavigate` import from `GlobalSearch.jsx`
+   - Removed unused `user_id` parameter from `_safe_update_conversation_in_index()` in `storage.py`
+
+**Files Modified**:
+| File | Changes |
+|------|---------|
+| `frontend/src/components/GlobalSearch.jsx` | User cache invalidation, 401 handling, removed unused import |
+| `backend/search.py` | SDK v29+ compatibility (`key_parameters`, `bytes` conversion) |
+| `backend/storage.py` | Removed unused `user_id` parameter from update function |
+
+### Collapsible Navigation Pattern (December 2024)
+
+**Implemented collapsible sub-menu navigation following the shadcn/ui sidebar-07 pattern.**
+
+**Installation**: Added `@radix-ui/react-collapsible` via `npx shadcn@latest add collapsible`
+
+**Components Added**:
+- `Collapsible`, `CollapsibleContent`, `CollapsibleTrigger` from `@/components/ui/collapsible`
+- `SidebarMenuSub`, `SidebarMenuSubButton`, `SidebarMenuSubItem` from `@/components/ui/sidebar`
+- `ChevronRight` icon from `lucide-react` for expand/collapse indicator
+
+**NAV_ITEMS Structure Enhancement**:
+```javascript
+// Each navigation item now supports optional subItems for collapsible menus
+{
+  id: "settings",           // Unique identifier
+  label: "Settings",        // Display text
+  icon: Settings,           // Lucide icon component
+  disabled: false,          // Optional: disable the item
+  badge: "Soon",            // Optional: badge text (e.g., "Soon", "New")
+  isActive: true,           // Optional: default expanded state for collapsible items
+  subItems: [               // Optional: array of sub-menu items
+    { id: "settings-general", label: "General" },
+    { id: "settings-notifications", label: "Notifications" },
+  ]
+}
+```
+
+**NavMain Component Behavior**:
+- Automatically detects `subItems` presence to determine rendering pattern
+- Items WITH `subItems`: Render as `Collapsible` with `ChevronRight` that rotates 90° when expanded
+- Items WITHOUT `subItems`: Render as flat navigation with direct click handling
+
+**Collapsible Items Added**:
+| Parent Item | Sub-Items |
+|-------------|-----------|
+| Workflows | Workflow Builder, Templates, Run History |
+| Analytics | Overview, Usage Metrics, Performance, Cost Analysis |
+| Reports | Scheduled Reports, Custom Reports, Exports |
+| Team | Members, Roles & Permissions, Invitations |
+| Security | Audit Log, Active Sessions, API Keys, SSO Configuration |
+| Settings | General, Notifications, Integrations, Billing |
+
+**Badge + ChevronRight Overlap Fix**:
+- **Problem**: `SidebarMenuBadge` uses absolute positioning (`position: absolute; right: 1rem`), causing overlap with `ChevronRight` icon
+- **Solution**: Moved badge INSIDE `SidebarMenuButton` as inline `<span>` element
+- **Layout**: Badge uses `ml-auto` to push right, chevron uses `ml-2` (small gap) when badge present, `ml-auto` when no badge
+```jsx
+// Badge inline with conditional chevron margin
+{item.badge && (
+  <span className="ml-auto text-xs text-muted-foreground">{item.badge}</span>
+)}
+<ChevronRight className={`${item.badge ? "ml-2" : "ml-auto"} transition-transform ...`} />
+```
+
+**Logo Size Adjustment**:
+- Full logo (expanded state): Changed from `h-8` to `h-13` in `LogoSwitcher` component
+- Logo mark (collapsed state): Remains at `size-8`
+
 ## Architecture
 
 ### Backend Structure (`backend/`)
@@ -230,6 +389,16 @@ def cleanup_test_data(test_user_id):
 - User messages stored in `messages` table, AI responses in `assistant_responses`
 - `_convert_joined_row_to_messages()`: Handles Supabase's 1:1 nested select (returns dict, not array)
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- **Typesense Integration**: Helper functions `_safe_index_conversation()`, `_safe_index_message()`, `_safe_update_conversation_in_index()` for real-time search indexing
+
+**`search.py`** (Typesense Search Integration)
+- `get_typesense_client()`: Singleton client initialization with lazy loading
+- `is_typesense_configured()`: Checks if all required environment variables are set
+- `generate_scoped_search_key()`: Creates user-scoped API keys with embedded `user_id` filter
+- `index_conversation()` / `index_message()`: Add documents to Typesense collections
+- `init_collections()`: CLI command to create collection schemas
+- `sync_from_supabase()`: CLI command to sync existing data to Typesense
+- **CLI Interface**: `python -m backend.search [init|sync]`
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
@@ -491,6 +660,11 @@ elif isinstance(response_data, list) and len(response_data) > 0:
     response = response_data[0]  # 1:N returns array
 ```
 14. **WorkOS SDK v5.0+ Breaking Change**: The `get_user_by_access_token()` method **does not exist** in WorkOS Python SDK v5.0+. Use local JWT validation with JWKS instead. Access tokens are JWTs that should be validated locally using the RS256 algorithm and the JWKS endpoint from `workos.user_management.get_jwks_url()`. See the "WorkOS SDK v5.0+ JWT Validation Fix" section above for implementation details.
+15. **SidebarMenuBadge + ChevronRight Overlap**: When using `SidebarMenuBadge` (absolute positioned) alongside `ChevronRight` icon in collapsible menu items, they overlap. **Solution**: Move badge inside `SidebarMenuButton` as an inline `<span>` with `ml-auto`, then use conditional margin on chevron: `ml-2` when badge present, `ml-auto` when no badge.
+16. **Typesense SDK v29+ Breaking Change**: The `generate_scoped_search_key()` function has two breaking changes in SDK v29+: (1) parameter renamed from `parameters` to `key_parameters`, (2) return type changed from `str` to `bytes`. **Solution**: Use `key_parameters=` and call `.decode("utf-8")` on the result.
+17. **Typesense Search Key User Switch**: Module-level adapter cache (`typesenseAdapter`) retains previous user's scoped key after sign-out/sign-in, causing empty results. **Solution**: Track `adapterUserId` and reset cache when `user?.id` changes via `useEffect`.
+18. **"Search not configured" After Auth**: If GlobalSearch's `useEffect` runs before authentication completes, API calls return 401 and the component shows "Search not configured". **Solution**: Use `useAuth()` hook and gate configuration check on `!isAuthLoading && user`.
+19. **Typesense Deprecation Warning**: The Typesense SDK v29 logs `AnalyticsRulesV1 is deprecated on v30+. Use client.analytics instead.` This is informational only and doesn't affect functionality.
 
 ## Future Enhancement Ideas
 
@@ -505,7 +679,7 @@ elif isinstance(response_data, list) and len(response_data) > 0:
 - Support for reasoning models (o1, etc.) with special handling
 - Dark mode toggle (theme infrastructure is in place via CSS variables)
 - Keyboard shortcuts for common actions (new conversation, toggle sidebar)
-- Search/filter conversations in sidebar
+- ~~Search/filter conversations in sidebar~~ ✅ Implemented via Typesense global search
 - Multi-tenant support (Phase 2+: organization-based conversation sharing)
 - RBAC for team permissions
 

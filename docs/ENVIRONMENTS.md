@@ -168,7 +168,98 @@ Each environment needs its own redirect URI configured in WorkOS:
 
 ---
 
-## 3. Environment Configuration Files
+## 3. Typesense Search Setup
+
+Typesense Cloud provides full-text search for conversations and messages. Each environment requires its own Typesense cluster.
+
+### Creating a Typesense Cloud Cluster
+
+1. Go to [Typesense Cloud](https://cloud.typesense.org)
+2. Click **Create Cluster**
+3. Configure the cluster:
+   - **Name**: `eternal-ops-{environment}` (e.g., `eternal-ops-dev`)
+   - **Plan**: Start with the smallest plan for dev/staging
+   - **Region**: Choose based on your location (Frankfurt for Europe)
+4. Wait for the cluster to be provisioned (~1-2 minutes)
+
+### Getting Credentials
+
+After cluster creation:
+1. Go to **Cluster Details** → **API Keys**
+2. Copy the following:
+   - **Host**: `{cluster-id}.a1.typesense.net` → `TYPESENSE_HOST`
+   - **Port**: `443` → `TYPESENSE_PORT`
+   - **Protocol**: `https` → `TYPESENSE_PROTOCOL`
+   - **Admin API Key**: Full access key → `TYPESENSE_API_KEY`
+   - **Search-only API Key**: Create one with read-only permissions → `TYPESENSE_SEARCH_ONLY_KEY`
+
+> ⚠️ **Security**: The Admin API Key has write access. Never expose it in frontend code. Only the search-only key is used for generating scoped keys.
+
+### Creating a Search-Only API Key
+
+1. In Typesense Cloud, go to **API Keys**
+2. Click **Generate API Key**
+3. Set permissions:
+   - **Actions**: `documents:search` only
+   - **Collections**: `conversations`, `messages`, `zep_memories`
+4. Save the key as `TYPESENSE_SEARCH_ONLY_KEY`
+
+### Initializing Collections
+
+After setting environment variables, run the migration commands:
+
+```bash
+# 1. Initialize collection schemas
+python -m backend.search init
+
+# Expected output:
+# Created collection: conversations
+# Created collection: messages
+# Created collection: zep_memories
+
+# 2. Sync existing data from Supabase
+python -m backend.search sync
+
+# Expected output:
+# Synced 18 conversations
+# Synced 14 messages
+# Synced 0 memories
+```
+
+### Verification
+
+Confirm the setup is working:
+
+```bash
+python -c "
+from backend.search import get_typesense_client
+client = get_typesense_client()
+for name in ['conversations', 'messages', 'zep_memories']:
+    info = client.collections[name].retrieve()
+    print(f'{name}: {info[\"num_documents\"]} documents')
+"
+```
+
+### Environment-Specific Typesense Clusters
+
+| Environment | Cluster Name | Region | Purpose |
+|-------------|--------------|--------|---------|
+| Development | `eternal-ops-dev` | Any | Local testing |
+| Staging | `eternal-ops-staging` | Same as prod | Pre-production testing |
+| Production | `eternal-ops-prod` | Frankfurt | Live search |
+
+### Rollback Procedure
+
+If Typesense becomes unavailable:
+
+1. **Storage operations continue normally** - Typesense indexing is non-blocking
+2. **Search bar shows "Search not configured"** - User can still navigate manually
+3. **To re-enable**: Fix Typesense credentials and restart backend
+4. **To re-sync after outage**: Run `python -m backend.search sync`
+
+---
+
+## 4. Environment Configuration Files
 
 ### File Structure
 
@@ -243,6 +334,21 @@ def get_environment():
 - Run the schema migration script on the affected environment
 - Compare schemas using `supabase db diff`
 
+**5. "Search not configured" after sign-in**
+- Ensure all `TYPESENSE_*` environment variables are set
+- Run `python -m backend.search init` to create collections
+- Check backend logs for Typesense connection errors
+- Verify the search-only key has correct permissions
+
+**6. Empty search results after user switch**
+- This is fixed in the latest code; ensure you're on the latest version
+- The GlobalSearch component now resets the adapter cache when user changes
+
+**7. Typesense indexing errors in logs**
+- Indexing failures don't block storage operations (graceful degradation)
+- Check cluster health in Typesense Cloud dashboard
+- Re-sync data with `python -m backend.search sync`
+
 ---
 
 ## 8. Security Checklist
@@ -255,6 +361,9 @@ Before deploying to production:
 - [ ] RLS policies are enabled on all tables
 - [ ] CORS `ALLOWED_ORIGINS` is set to specific domains (not `*`)
 - [ ] Email domain validation is configured (`EMPLOYEE_EMAIL_DOMAIN`)
+- [ ] `TYPESENSE_API_KEY` (admin key) is never exposed to frontend
+- [ ] `TYPESENSE_SEARCH_ONLY_KEY` is used only for generating scoped keys
+- [ ] Scoped search keys expire (default: 1 hour)
 
 ---
 
@@ -286,6 +395,11 @@ python -m pytest tests/ -v
 | `ALLOWED_ORIGINS` | No | CORS allowed origins |
 | `VITE_WORKOS_CLIENT_ID` | Yes | WorkOS client ID (frontend) |
 | `VITE_WORKOS_REDIRECT_URI` | Yes | OAuth callback URL (frontend) |
+| `TYPESENSE_HOST` | Yes | Typesense Cloud hostname |
+| `TYPESENSE_PORT` | Yes | API port (443 for HTTPS) |
+| `TYPESENSE_PROTOCOL` | Yes | Connection protocol (`https`) |
+| `TYPESENSE_API_KEY` | Yes | Admin API key (write access) |
+| `TYPESENSE_SEARCH_ONLY_KEY` | Yes | Search-only key (read access) |
 
 ## 4. Vercel Deployment Configuration
 
