@@ -33,7 +33,15 @@ export default function ChatInterface({
   const userScrolledUpRef = useRef(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use scrollTo on the container instead of scrollIntoView to avoid
+    // scrolling ancestor containers (which breaks the conversation sidebar scroll)
+    const container = scrollAreaRef.current;
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   };
 
   // Track if user has scrolled up manually

@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlusCircle, MessageSquare, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -58,9 +57,8 @@ export default function ConversationSidebar({
         </Button>
       </div>
 
-      {/* Conversation list */}
-      <ScrollArea className="flex-1">
-        <div className="p-2">
+      {/* Conversation list - native scrolling for reliability */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2">
           {conversations.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
               No conversations yet
@@ -72,10 +70,11 @@ export default function ConversationSidebar({
                 const isProcessing = processingConversations.has(conv.id)
                 return (
                   <button
+                    type="button"
                     key={conv.id}
                     className={cn(
                       "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                      "hover:bg-accent",
+                      "hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       conv.id === currentConversationId
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground"
@@ -114,8 +113,7 @@ export default function ConversationSidebar({
               })}
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

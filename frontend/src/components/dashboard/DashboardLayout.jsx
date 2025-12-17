@@ -18,15 +18,15 @@ export default function DashboardLayout({
 }) {
   return (
     <SidebarProvider defaultOpen={true}>
-      <DashboardSidebar 
-        activeFeature={activeFeature} 
-        onFeatureChange={onFeatureChange} 
+      <DashboardSidebar
+        activeFeature={activeFeature}
+        onFeatureChange={onFeatureChange}
       />
-      <SidebarInset>
+      <SidebarInset className="h-svh overflow-hidden">
         <DashboardHeader />
-        <main className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {children}
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )
