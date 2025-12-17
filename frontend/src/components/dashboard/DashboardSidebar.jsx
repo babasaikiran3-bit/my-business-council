@@ -11,17 +11,21 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { 
-  Bot, 
-  LayoutDashboard, 
-  BarChart3, 
-  Settings, 
+import {
+  LayoutDashboard,
+  BarChart3,
+  Settings,
   Users,
   FileText,
   Workflow,
   Shield,
+  Bot,
 } from "lucide-react"
 import UserMenu from "../UserMenu"
+
+// Logo images for sidebar header
+const logoFull = "/logo-full.png"
+const logoMark = "/logo-mark.png"
 
 // Navigation items for the dashboard
 const NAV_ITEMS = [
@@ -62,15 +66,20 @@ const NAV_ITEMS = [
 export default function DashboardSidebar({ activeFeature, onFeatureChange }) {
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Bot className="h-4 w-4" />
-          </div>
-          <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-            <span className="text-sm font-semibold">Eternal Ops Control</span>
-            <span className="text-xs text-muted-foreground">Operations Platform</span>
-          </div>
+      <SidebarHeader className="h-14 border-b border-sidebar-border">
+        <div className="flex h-full w-full items-center justify-center px-3 group-data-[collapsible=icon]:px-0">
+          {/* Full logo - shown when sidebar is expanded */}
+          <img
+            src={logoFull}
+            alt="Eternal"
+            className="h-[52px] w-auto object-contain group-data-[collapsible=icon]:hidden"
+          />
+          {/* Mark/icon logo - shown when sidebar is collapsed */}
+          <img
+            src={logoMark}
+            alt="Eternal"
+            className="h-10 w-10 object-contain hidden group-data-[collapsible=icon]:block"
+          />
         </div>
       </SidebarHeader>
       
