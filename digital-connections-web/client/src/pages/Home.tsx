@@ -52,7 +52,7 @@ export default function Home() {
             </motion.h1>
             
             <motion.p variants={fadeInUp} className="text-xl md:text-2xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-              Inspired by the Spirit of Ubuntu — "I am because we are."
+              Inspired by the Spirit of Ubuntu, an ancient South African term meaning "I am because we are."
             </motion.p>
             
             <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -107,7 +107,7 @@ export default function Home() {
                 <span className="text-gradient-accent">Business Driven.</span>
               </h2>
               <p className="text-lg text-muted-foreground mb-6 leading-relaxed">
-                At Dygital Connections, we believe that technology is a means to an end—better business outcomes and stronger human connections. Our philosophy is deeply rooted in the spirit of Ubuntu, emphasizing that success is a collective achievement.
+                At Dygital Connections, we believe that technology is a means to an end—better business outcomes and stronger human connections. Our philosophy is deeply rooted in the spirit of Ubuntu, an ancient South African term emphasizing that success is a collective achievement.
               </p>
               <p className="text-lg text-muted-foreground mb-8 leading-relaxed">
                 Inspired by the collaborative power of the open-source movement, we build integrated solutions that don't just function—they empower. We bridge the gap between complex technical systems and the strategic goals of your organization.
@@ -228,7 +228,7 @@ export default function Home() {
             Ready to <span className="text-gradient-accent">Transform?</span>
           </h2>
           <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
-            Let's discuss how we can bring strategic innovation and the spirit of Ubuntu to your business.
+            Let's discuss how we can bring strategic innovation and the spirit of Ubuntu, an ancient South African philosophy, to your business.
           </p>
           <Link href="/contact">
             <Button size="lg" className="rounded-full text-lg px-10 h-16 bg-primary hover:bg-primary/90 text-primary-foreground shadow-xl shadow-primary/20 transition-transform hover:scale-105">

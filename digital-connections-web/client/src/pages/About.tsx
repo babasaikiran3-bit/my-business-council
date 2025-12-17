@@ -39,10 +39,10 @@ export default function About() {
                   "I am because we are."
                 </blockquote>
                 <p className="text-lg text-muted-foreground mb-6 leading-relaxed">
-                  Ubuntu is more than just a word; it's a philosophy that defines our existence through our interactions with others. In business, this translates to a deep understanding that no company, no team, and no solution exists in isolation.
+                  Ubuntu is an ancient South African term that means "I am because we are." It is a philosophy that defines our existence through our interactions with others. In business, this translates to a deep understanding that no company, no team, and no solution exists in isolation.
                 </p>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  We draw inspiration from this principle—shared by the open-source Linux movement—to guide our approach. It reminds us that true success is collective. We thrive only when our clients, our partners, and our community thrive together.
+                  Following on from this, we draw inspiration from the open source Linux movement, which adopted this name to represent the spirit of sharing and collaboration in software. Just as the Linux community builds better systems through collective effort, we build better business solutions through deep partnership and integration.
                 </p>
               </div>
               <div className="relative h-[400px] rounded-2xl overflow-hidden glass-panel">
