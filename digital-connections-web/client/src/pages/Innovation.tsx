@@ -63,11 +63,11 @@ export default function Innovation() {
 
   return (
     <Layout>
-      <div className="flex flex-col h-screen pt-20 relative">
+      <div className="flex flex-col min-h-[calc(100vh-80px)] relative">
         {/* Background Image with Overlay */}
         <div className="absolute inset-0 z-0">
           <img 
-            src="/images/innovation-council.png" 
+            src="/images/innovation-council-v2.png" 
             alt="Council Background" 
             className="w-full h-full object-cover opacity-60"
           />
@@ -93,7 +93,7 @@ export default function Innovation() {
         </div>
 
         {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth relative z-10">
+        <div className="flex-1 p-4 md:p-8 relative z-10 pb-24">
           <div className="container mx-auto max-w-4xl space-y-8">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6">
@@ -172,7 +172,7 @@ export default function Innovation() {
         </div>
 
         {/* Input Area */}
-        <div className="bg-background/80 backdrop-blur-md border-t border-white/10 p-4 relative z-10">
+        <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-md border-t border-white/10 p-4 z-20">
           <div className="container mx-auto max-w-4xl">
             <form onSubmit={handleSendMessage} className="relative">
               <Input
