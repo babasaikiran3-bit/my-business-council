@@ -1,0 +1,16 @@
+# Nixpacks configuration for Railway deployment
+
+# Use both Node and Python providers
+providers = ["node", "python"]
+
+[phases.install]
+cmds = [
+    "cd frontend && npm ci",
+    "pip install -r requirements.txt"
+]
+
+[phases.build]
+cmds = ["cd frontend && npm run build"]
+
+[start]
+cmd = "python -m backend.main"
