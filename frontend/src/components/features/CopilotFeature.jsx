@@ -18,9 +18,17 @@ export default function CopilotFeature({ initialConversationId }) {
 
   const [conversations, setConversations] = useState([])
   const [currentConversationId, setCurrentConversationId] = useState(null)
-  const [currentConversation, setCurrentConversation] = useState(null)
+  // Initialize with a draft conversation so users can start typing immediately
+  // id: null indicates this is a draft, not yet persisted to backend
+  const [currentConversation, setCurrentConversation] = useState({
+    id: null,
+    messages: [],
+    title: null,
+  })
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  // Track when we're creating a conversation on first message send
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false)
 
   // Error state for current conversation with retry info
   const [currentError, setCurrentError] = useState(null)
@@ -79,12 +87,14 @@ export default function CopilotFeature({ initialConversationId }) {
     }
   }, [initialConversationId])
 
-  // Load conversation details when selected
+  // Load conversation details when selected (but not when actively streaming)
+  // When a new conversation is created during message send, we don't want to reload
+  // because that would overwrite the in-progress streaming data
   useEffect(() => {
-    if (currentConversationId) {
+    if (currentConversationId && !isLoading && !streamControllerRef.current) {
       loadConversation(currentConversationId)
     }
-  }, [currentConversationId])
+  }, [currentConversationId, isLoading])
 
   // Keep latestStageTimingsRef in sync with stageTimings
   useEffect(() => {
@@ -176,23 +186,23 @@ export default function CopilotFeature({ initialConversationId }) {
     }
   }
 
-  const handleNewConversation = async () => {
-    try {
-      const newConv = await api.createConversation()
-      setConversations((prev) => [
-        { id: newConv.id, created_at: newConv.created_at, title: newConv.title, message_count: 0 },
-        ...prev,
-      ])
-      setCurrentConversation(newConv)
-      setCurrentConversationId(newConv.id)
-      toast.success('New conversation created')
-    } catch (error) {
-      console.error('Failed to create conversation:', error)
-      // Skip toast for connection errors - the ConnectionErrorBanner handles those
-      if (!isConnectionError(error)) {
-        toast.error('Failed to create conversation')
-      }
+  const handleNewConversation = () => {
+    // Cancel any ongoing stream
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort()
+      streamControllerRef.current = null
+      setIsLoading(false)
+      resetProgressState()
     }
+
+    // Reset to a new draft conversation (no API call - conversation created on first message)
+    setCurrentConversationId(null)
+    setCurrentConversation({
+      id: null,
+      messages: [],
+      title: null,
+    })
+    setCurrentError(null)
   }
 
   const handleSelectConversation = (id) => {
@@ -227,8 +237,6 @@ export default function CopilotFeature({ initialConversationId }) {
   }
 
   const handleSendMessage = async (content, originalQuery = null) => {
-    if (!currentConversationId) return
-
     setCurrentError(null)
 
     if (streamControllerRef.current) {
@@ -241,7 +249,41 @@ export default function CopilotFeature({ initialConversationId }) {
     setIsLoading(true)
     resetProgressState()
 
+    // Track the conversation ID - may be null for draft conversations
+    let conversationId = currentConversationId
+
     try {
+      // If no conversation exists yet (draft), create one first
+      if (!conversationId) {
+        setIsCreatingConversation(true)
+        try {
+          const newConv = await api.createConversation()
+          conversationId = newConv.id
+          // Add to conversation list
+          setConversations((prev) => [
+            { id: newConv.id, created_at: newConv.created_at, title: newConv.title, message_count: 0 },
+            ...prev,
+          ])
+          // Update current conversation with the new ID
+          setCurrentConversationId(newConv.id)
+          setCurrentConversation((prev) => ({
+            ...prev,
+            id: newConv.id,
+          }))
+        } catch (error) {
+          console.error('Failed to create conversation:', error)
+          if (!isConnectionError(error)) {
+            toast.error('Failed to create conversation. Please try again.')
+          }
+          setIsLoading(false)
+          setIsCreatingConversation(false)
+          streamControllerRef.current = null
+          return // Exit early if we can't create the conversation
+        } finally {
+          setIsCreatingConversation(false)
+        }
+      }
+
       const userMessage = { role: 'user', content }
       setCurrentConversation((prev) => ({
         ...prev,
@@ -266,7 +308,7 @@ export default function CopilotFeature({ initialConversationId }) {
         messages: [...prev.messages, assistantMessage],
       }))
 
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(conversationId, content, (eventType, event) => {
         handleStreamEvent(eventType, event, content, originalQuery)
       }, { originalQuery, signal: controller.signal })
     } catch (error) {
@@ -457,6 +499,7 @@ export default function CopilotFeature({ initialConversationId }) {
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        isCreatingConversation={isCreatingConversation}
         stageTimings={stageTimings}
         modelStatuses={modelStatuses}
         modelTimings={modelTimings}

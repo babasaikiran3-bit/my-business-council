@@ -1,8 +1,11 @@
 """3-stage Eternal Copilot orchestration."""
 
+import logging
 from typing import List, Dict, Any, Tuple, Callable, Optional
 from .openrouter import query_models_parallel, query_model, query_models_parallel_with_progress
 from .config import COPILOT_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
+
+logger = logging.getLogger(__name__)
 
 
 def get_copilot_models() -> List[str]:
@@ -182,6 +185,36 @@ Now provide your evaluation and ranking:"""
     return stage2_results, label_to_model
 
 
+def _truncate_response(response: str, max_chars: int = 12000) -> str:
+    """
+    Truncate a response to a maximum character count, preserving complete sentences.
+
+    Args:
+        response: The response text to truncate
+        max_chars: Maximum number of characters to keep (default ~3000 tokens)
+
+    Returns:
+        Truncated response with ellipsis if truncated
+    """
+    if len(response) <= max_chars:
+        return response
+
+    # Try to find the last complete sentence within the limit
+    truncated = response[:max_chars]
+
+    # Look for sentence endings (., !, ?) followed by space or end
+    last_sentence_end = -1
+    for i in range(len(truncated) - 1, max(0, len(truncated) - 500), -1):
+        if truncated[i] in '.!?' and (i + 1 >= len(truncated) or truncated[i + 1].isspace()):
+            last_sentence_end = i + 1
+            break
+
+    if last_sentence_end > max_chars // 2:  # Only use if we keep at least half
+        return truncated[:last_sentence_end] + "\n\n[Response truncated for context limits...]"
+
+    return truncated + "...\n\n[Response truncated for context limits...]"
+
+
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
@@ -198,9 +231,14 @@ async def stage3_synthesize_final(
     Returns:
         Dict with 'model' and 'response' keys
     """
-    # Build comprehensive context for chairman
+    # Maximum characters per response to avoid context overflow
+    # ~3000 tokens per response * 4 models = ~12000 tokens for Stage 1
+    # This keeps total prompt under ~20000 tokens which is safe for most models
+    MAX_RESPONSE_CHARS = 12000
+
+    # Build comprehensive context for chairman with truncation
     stage1_text = "\n\n".join([
-        f"Model: {result['model']}\nResponse: {result['response']}"
+        f"Model: {result['model']}\nResponse: {_truncate_response(result['response'], MAX_RESPONSE_CHARS)}"
         for result in stage1_results
     ])
 
@@ -229,18 +267,26 @@ Provide a clear, well-reasoned final answer that represents the copilot's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
+    logger.info(f"[STAGE3] Querying chairman model: {CHAIRMAN_MODEL}")
+    logger.info(f"[STAGE3] Chairman prompt size: {len(chairman_prompt)} chars (~{len(chairman_prompt) // 4} tokens)")
     response = await query_model(CHAIRMAN_MODEL, messages)
+    logger.info(f"[STAGE3] Chairman response received: {response}")
 
     if response is None:
         # Fallback if chairman fails
+        logger.warning(f"[STAGE3] Chairman model returned None, using fallback")
         return {
             "model": CHAIRMAN_MODEL,
             "response": "Error: Unable to generate final synthesis."
         }
 
+    content = response.get('content') or ''
+    if not content:
+        logger.warning(f"[STAGE3] Chairman response content is empty. Full response: {response}")
+
     return {
         "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "response": content
     }
 
 

@@ -37,7 +37,13 @@ export default function Stage3({ finalResponse, timing }) {
       </CardHeader>
       <CardContent>
         <div className="markdown-content">
-          <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
+          {finalResponse.response ? (
+            <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
+          ) : (
+            <p className="text-muted-foreground italic">
+              No response generated. This may happen if the combined context from Stage 1 and Stage 2 exceeded the model&apos;s context limit.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

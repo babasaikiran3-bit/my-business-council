@@ -17,6 +17,7 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  isCreatingConversation = false,
   stageTimings,
   modelStatuses,
   modelTimings,
@@ -323,16 +324,8 @@ export default function ChatInterface({
     }
   };
 
-  if (!conversation) {
-    return (
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-background">
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold text-foreground mb-2">Welcome to Eternal Copilot</h2>
-          <p className="text-muted-foreground">Create a new conversation to get started</p>
-        </div>
-      </div>
-    );
-  }
+  // Note: conversation is always provided (draft or persisted), so no early return needed
+  // The empty state is handled below when conversation.messages is empty
 
   return (
     <div className="flex flex-col bg-background flex-1 min-h-0 overflow-hidden">
@@ -340,11 +333,84 @@ export default function ChatInterface({
       <div ref={scrollAreaRef} className="flex-1 min-h-0 overflow-y-auto" onScroll={handleScroll}>
         <div className="p-6">
           {conversation.messages.length === 0 ? (
-            <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
-              <div className="text-center">
+            <div className="flex flex-col items-center pt-8 pb-6 px-6">
+              {/* Header text */}
+              <div className="text-center mb-6">
                 <h2 className="text-2xl font-semibold text-foreground mb-2">Start a conversation</h2>
                 <p className="text-muted-foreground">Ask a question to consult Eternal Copilot</p>
               </div>
+
+              {/* Input form - prominently placed at top */}
+              <form onSubmit={handleSubmit} className="w-full max-w-4xl space-y-3">
+                {/* Horizontal layout: Textarea on left, buttons stacked on right */}
+                <div className="flex gap-3 items-stretch">
+                  <Textarea
+                    placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={isLoading || isImproving || isCreatingConversation}
+                    rows={3}
+                    className="resize-y flex-1"
+                    autoFocus
+                  />
+                  <div className="flex flex-col gap-2 justify-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImprovePrompt}
+                      disabled={!input.trim() || isImproving || isLoading || isCreatingConversation}
+                      className="whitespace-nowrap"
+                    >
+                      {isImproving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Improving...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          Improve Prompt
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={!input.trim() || isLoading || isImproving || isCreatingConversation}
+                      className="whitespace-nowrap"
+                    >
+                      {isCreatingConversation ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-4 w-4 mr-2" />
+                          Send
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {originalPrompt && (
+                  <Card className="bg-muted/50">
+                    <CardContent className="pt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-muted-foreground">Original prompt:</span>
+                        <Button type="button" variant="ghost" size="sm" onClick={handleUndoImprovement}>
+                          <Undo2 className="h-3 w-3 mr-1" />
+                          Undo
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{originalPrompt}</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </form>
             </div>
           ) : (
             <div className="space-y-6 max-w-4xl mx-auto">
@@ -493,71 +559,6 @@ export default function ChatInterface({
           <div ref={messagesEndRef} />
         </div>
       </div>
-
-      {conversation.messages.length === 0 && (
-        <div className="border-t p-6 bg-background">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-3">
-            {/* Horizontal layout: Textarea on left, buttons stacked on right */}
-            <div className="flex gap-3 items-stretch">
-              <Textarea
-                placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || isImproving}
-                rows={3}
-                className="resize-y flex-1"
-              />
-              <div className="flex flex-col gap-2 justify-center">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleImprovePrompt}
-                  disabled={!input.trim() || isImproving || isLoading}
-                  className="whitespace-nowrap"
-                >
-                  {isImproving ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Improving...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Improve Prompt
-                    </>
-                  )}
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!input.trim() || isLoading || isImproving}
-                  className="whitespace-nowrap"
-                >
-                  <Send className="h-4 w-4 mr-2" />
-                  Send
-                </Button>
-              </div>
-            </div>
-
-            {originalPrompt && (
-              <Card className="bg-muted/50">
-                <CardContent className="pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-muted-foreground">Original prompt:</span>
-                    <Button type="button" variant="ghost" size="sm" onClick={handleUndoImprovement}>
-                      <Undo2 className="h-3 w-3 mr-1" />
-                      Undo
-                    </Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{originalPrompt}</p>
-                </CardContent>
-              </Card>
-            )}
-          </form>
-        </div>
-      )}
     </div>
   );
 }
