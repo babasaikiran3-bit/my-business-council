@@ -260,6 +260,29 @@ export default function Innovation() {
               </div>
             </motion.div>
           </div>
+          
+          {/* Inspiration & Methodology Section */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="mt-24 pt-12 border-t border-white/5 text-center max-w-4xl mx-auto"
+          >
+            <h3 className="text-2xl font-display font-bold mb-6">Reimagining Delivery</h3>
+            <p className="text-muted-foreground leading-relaxed mb-8">
+              Our approach is not just about using AI—it's about restructuring how value is created. 
+              Drawing inspiration from pioneering initiatives like <a href="https://github.com/karpathy/llm-council" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Andrej Karpathy's LLM Council</a>, 
+              and leveraging next-generation tools such as <strong>Figma</strong>, <strong>Builder.io</strong>, and <strong>GitHub Copilot</strong>, 
+              we have developed a new paradigm for delivering business solutions. By automating the routine and augmenting the strategic, 
+              we turn complex workflows into seamless digital connections.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 text-sm text-muted-foreground/60 font-mono">
+              <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5">LLM Council</span>
+              <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5">Figma</span>
+              <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5">Builder.io</span>
+              <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5">GitHub Copilot</span>
+            </div>
+          </motion.div>
         </div>
       </section>
     </Layout>
