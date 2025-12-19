@@ -8,6 +8,79 @@ Eternal Copilot is a 3-stage deliberation system where multiple LLMs collaborati
 
 ## Recent Changes (December 2024)
 
+### Timeout Configuration Updates (December 19, 2024)
+
+**Problem**: The `openai/gpt-5.2-pro` model took **360,318 milliseconds (approximately 6 minutes)** to respond during deliberations. The previous 5-6 minute timeout configurations caused premature timeouts, resulting in "Deliberation Failed" errors mid-stage and loss of partial data.
+
+**Solution**: Increased all timeout configurations from 5-6 minutes to **8 minutes (480 seconds / 480,000 milliseconds)** to accommodate slow models with a buffer for network latency and API queuing.
+
+| Location | Setting | Old Value | New Value |
+|----------|---------|-----------|-----------|
+| `frontend/src/components/features/CopilotFeature.jsx` | `STREAM_TIMEOUT_MS` | 360,000ms (6 min) | **480,000ms (8 min)** |
+| `frontend/src/components/features/CopilotFeature.jsx` | `STALE_THRESHOLD_MS` | 360,000ms (6 min) | **480,000ms (8 min)** |
+| `backend/openrouter.py` | `DEFAULT_TIMEOUT` | 300.0s (5 min) | **480.0s (8 min)** |
+
+**Rationale**: The 8-minute timeout provides:
+- 2-minute buffer above the observed 6-minute response time
+- Margin for variations in model response times across different queries
+- Buffer for network latency and OpenRouter API queuing delays
+
+**Files Modified**:
+| File | Change |
+|------|--------|
+| `frontend/src/components/features/CopilotFeature.jsx` | Updated `STREAM_TIMEOUT_MS` and `STALE_THRESHOLD_MS` with inline comments |
+| `backend/openrouter.py` | Updated `DEFAULT_TIMEOUT` constant and docstrings |
+
+### SSE Streaming & Buffering Fixes (December 19, 2024)
+
+**Problem**: SSE events from the backend were not reaching the frontend in real-time. The frontend UI would show "Stage 1: Collecting responses..." with a frozen 0.0s timer, even though backend logs showed models responding.
+
+**Solution**: Added proper SSE headers to prevent proxy buffering and ensure real-time event delivery:
+
+```python
+return StreamingResponse(
+    event_generator(),
+    media_type="text/event-stream",
+    headers={
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # Disable nginx buffering
+        "Content-Type": "text/event-stream; charset=utf-8",
+    }
+)
+```
+
+**Key Headers**:
+- `X-Accel-Buffering: no` - Prevents nginx from buffering SSE events (critical for real-time delivery)
+- `Cache-Control: no-cache, no-transform` - Prevents caching and transformation by proxies
+- `Connection: keep-alive` - Maintains persistent connection for streaming
+
+**Frontend Debugging** (in `frontend/src/api.js`):
+- Added `console.log('[SSE] Received chunk:', ...)` for debugging event reception
+- Added `console.log('[SSE] Parsed event:', ...)` for debugging event parsing
+- Added `console.error('[SSE] Failed to parse SSE event:', ...)` for parse error logging
+
+### Logging Configuration (December 19, 2024)
+
+**Problem**: Backend stream events were not visible in logs, making it difficult to debug SSE streaming issues. The default Python logging configuration wasn't capturing INFO-level messages from the application.
+
+**Solution**: Added explicit `logging.basicConfig()` to `backend/main.py`:
+
+```python
+# Configure logging for the backend module to show INFO level messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+**Log Messages Now Visible**:
+- `[STREAM] Starting stream for conversation_id=...` - Stream initialization
+- `[STREAM] Model X succeeded in Y.Zs` - Individual model response completion
+- `[STREAM] Emitting model_response event for X (N remaining)` - Event emission
+- `[STREAM] Stage N completed in X.Ys` - Stage completion times
+- `[STREAM] Deliberation completed: Stage1=Xs, Stage2=Ys, Stage3=Zs, Total=Ws` - Full deliberation summary
+
 ### Tailwind CSS v4 Migration
 - **CSS-first configuration**: No `tailwind.config.js` file - configuration is done via `@theme` directive in `index.css`
 - **Import syntax**: Uses `@import "tailwindcss"` instead of `@tailwind` directives
@@ -665,6 +738,14 @@ elif isinstance(response_data, list) and len(response_data) > 0:
 17. **Typesense Search Key User Switch**: Module-level adapter cache (`typesenseAdapter`) retains previous user's scoped key after sign-out/sign-in, causing empty results. **Solution**: Track `adapterUserId` and reset cache when `user?.id` changes via `useEffect`.
 18. **"Search not configured" After Auth**: If GlobalSearch's `useEffect` runs before authentication completes, API calls return 401 and the component shows "Search not configured". **Solution**: Use `useAuth()` hook and gate configuration check on `!isAuthLoading && user`.
 19. **Typesense Deprecation Warning**: The Typesense SDK v29 logs `AnalyticsRulesV1 is deprecated on v30+. Use client.analytics instead.` This is informational only and doesn't affect functionality.
+20. **⚠️ IMPORTANT: Timeout Configuration**: Premature timeouts cause deliberations to fail mid-stage, losing partial data. The current 8-minute timeout (480s/480,000ms) is calibrated for `openai/gpt-5.2-pro` which can take **6+ minutes** to respond. **Critical considerations**:
+   - If adding new models or changing OpenRouter providers, verify their response times don't exceed 8 minutes
+   - All three timeout mechanisms must stay synchronized:
+     - `STREAM_TIMEOUT_MS` in `frontend/src/components/features/CopilotFeature.jsx`
+     - `STALE_THRESHOLD_MS` in `frontend/src/components/features/CopilotFeature.jsx`
+     - `DEFAULT_TIMEOUT` in `backend/openrouter.py`
+   - If any single timeout is shorter than the actual model response time, the deliberation will fail
+   - See "Timeout Configuration Updates (December 19, 2024)" section for full details
 
 ## Future Enhancement Ideas
 

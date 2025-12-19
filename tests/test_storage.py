@@ -309,10 +309,10 @@ class TestIncrementalPersistence:
         conversation = storage.get_conversation(test_conversation_id, user_id=test_user_id)
         assert len(conversation["messages"]) == 2
         assert conversation["messages"][1]["role"] == "assistant"
-        # Placeholder has empty stages
+        # Placeholder has empty stages (stage3 is None to prevent "Chairman: Unknown" UI bug)
         assert conversation["messages"][1]["stage1"] == []
         assert conversation["messages"][1]["stage2"] == []
-        assert conversation["messages"][1]["stage3"] == {}
+        assert conversation["messages"][1]["stage3"] is None
 
     def test_incremental_stage_updates(
         self,
@@ -346,10 +346,10 @@ class TestIncrementalPersistence:
             response_id, sample_stage2_evaluations, 2500, sample_metadata
         )
 
-        # Verify stage 2 is saved
+        # Verify stage 2 is saved (stage3 is None until updated)
         conversation = storage.get_conversation(test_conversation_id, user_id=test_user_id)
         assert len(conversation["messages"][1]["stage2"]) > 0
-        assert conversation["messages"][1]["stage3"] == {}
+        assert conversation["messages"][1]["stage3"] is None
 
         # Update stage 3
         storage.update_response_stage3(response_id, sample_stage3_synthesis, 1000)

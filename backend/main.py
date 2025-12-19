@@ -11,6 +11,12 @@ import uuid
 import json
 import asyncio
 
+# Configure logging for the backend module to show INFO level messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 from . import storage
 from .auth import AuthenticatedUser, get_current_user
 from .config import WORKOS_API_KEY, WORKOS_CLIENT_ID, ALLOWED_ORIGINS
@@ -122,6 +128,10 @@ class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
     original_query: str | None = None  # Original user-typed query (before improvement)
+    # For smart retry: skip stages that already completed successfully
+    stage1_data: list | None = None  # Completed Stage 1 responses to reuse
+    stage2_data: list | None = None  # Completed Stage 2 rankings to reuse
+    stage2_metadata: dict | None = None  # label_to_model and aggregate_rankings from Stage 2
 
 
 class ImprovePromptRequest(BaseModel):
@@ -334,6 +344,9 @@ async def send_message_stream(
 
         async def on_model_complete(model: str, response_content, success: bool, elapsed_ms: int):
             """Callback when a model completes - adds event to queue."""
+            elapsed_sec = elapsed_ms / 1000
+            status = "succeeded" if success else "failed"
+            logger.info(f"[STREAM] Model {model} {status} in {elapsed_sec:.1f}s for conversation {captured_conversation_id}")
             event = {
                 'type': 'model_response',
                 'model': model,
@@ -342,6 +355,7 @@ async def send_message_stream(
                 'response_content': response_content,
             }
             await model_events.put(event)
+            logger.debug(f"[STREAM] Added model_response event to queue for {model}")
 
         # Initialize response_id before try block so it's accessible in except for cleanup
         response_id = None
@@ -416,73 +430,164 @@ async def send_message_stream(
                     pass
                 return None
 
-            # Stage 1: Collect responses with individual model progress
-            yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
+            # Stage 1: Collect responses (or reuse from retry)
+            if request.stage1_data:
+                # Smart retry: reuse Stage 1 results from previous failed attempt
+                stage1_results = request.stage1_data
+                stage1_duration_ms = 0  # No time spent, reusing cached data
+                logger.info(f"[STREAM] Reusing {len(stage1_results)} Stage 1 responses from retry for conversation {captured_conversation_id}")
 
-            stage1_start = time.time()
+                # Still save to storage for consistency (in case Stage 2/3 fail again)
+                storage.update_response_stage1(
+                    response_id, stage1_results, stage1_duration_ms
+                )
+                logger.info(f"[STREAM] Saved reused stage1 results for response {response_id}")
 
-            # Start stage1 with progress tracking
-            stage1_task = asyncio.create_task(
-                stage1_collect_responses_with_progress(request.content, on_model_complete)
-            )
+                yield f"data: {json.dumps({'type': 'stage1_skipped', 'data': stage1_results, 'reused': True})}\n\n"
+            else:
+                # Normal flow: collect responses from all models
+                logger.info(f"[STREAM] Starting Stage 1 with {len(copilot_models)} models for conversation {captured_conversation_id}")
+                yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
 
-            # Emit model completion events as they arrive, checking for title in between
-            models_remaining = len(copilot_models)
-            while models_remaining > 0:
-                event = await model_events.get()
-                yield f"data: {json.dumps(event)}\n\n"
-                models_remaining -= 1
-                # Check if title is ready while waiting for model responses
+                stage1_start = time.time()
+
+                # Start stage1 with progress tracking
+                logger.info(f"[STREAM] Launching parallel model queries for conversation {captured_conversation_id}")
+                stage1_task = asyncio.create_task(
+                    stage1_collect_responses_with_progress(request.content, on_model_complete)
+                )
+
+                # Emit model completion events as they arrive, checking for title in between
+                models_remaining = len(copilot_models)
+                logger.info(f"[STREAM] Waiting for {models_remaining} model responses...")
+                while models_remaining > 0:
+                    event = await model_events.get()
+                    logger.info(f"[STREAM] Emitting model_response event for {event.get('model')} ({models_remaining - 1} remaining)")
+                    yield f"data: {json.dumps(event)}\n\n"
+                    models_remaining -= 1
+                    # Check if title is ready while waiting for model responses
+                    title_event = await check_and_emit_title()
+                    if title_event:
+                        yield title_event
+
+                # Wait for stage1 to complete and get results
+                stage1_results = await stage1_task
+                stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+                stage1_duration_sec = stage1_duration_ms / 1000
+                successful_models = len(stage1_results)
+                logger.info(f"[STREAM] Stage 1 completed in {stage1_duration_sec:.1f}s - {successful_models}/{len(copilot_models)} models responded for conversation {captured_conversation_id}")
+
+                # Check for title after stage1 completes
                 title_event = await check_and_emit_title()
                 if title_event:
                     yield title_event
 
-            # Wait for stage1 to complete and get results
-            stage1_results = await stage1_task
-            stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+                # Step 3: Save Stage 1 results immediately (incremental persistence)
+                storage.update_response_stage1(
+                    response_id, stage1_results, stage1_duration_ms
+                )
+                logger.info(f"[STREAM] Saved stage1 results for response {response_id} (user message {user_message_id})")
 
-            # Check for title after stage1 completes
-            title_event = await check_and_emit_title()
-            if title_event:
-                yield title_event
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
 
-            # Step 3: Save Stage 1 results immediately (incremental persistence)
-            storage.update_response_stage1(
-                response_id, stage1_results, stage1_duration_ms
-            )
-            logger.info(f"[STREAM] Saved stage1 results for response {response_id} (user message {user_message_id})")
+            # Check if we have any successful Stage 1 responses
+            # If all models failed, we cannot proceed to Stage 2 ranking
+            if not stage1_results:
+                error_msg = "All models failed to respond. Please try again later."
+                logger.error(f"[STREAM] Stage 1 failed - no model responses received for conversation {captured_conversation_id}")
 
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
+                # Cancel title_task if it exists and is still running
+                if title_task is not None and not title_task.done():
+                    title_task.cancel()
+                    try:
+                        await title_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
 
-            # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_start = time.time()
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+                # Clean up the incomplete response placeholder
+                if response_id is not None:
+                    storage.delete_response_placeholder(response_id)
+                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage1'})}\n\n"
+                return
 
-            # Check for title after stage2 completes
-            title_event = await check_and_emit_title()
-            if title_event:
-                yield title_event
+            # Stage 2: Collect rankings (or reuse from retry)
+            if request.stage2_data and request.stage2_metadata:
+                # Smart retry: reuse Stage 2 results from previous failed attempt
+                stage2_results = request.stage2_data
+                label_to_model = request.stage2_metadata.get("label_to_model", {})
+                aggregate_rankings = request.stage2_metadata.get("aggregate_rankings", [])
+                metadata = request.stage2_metadata
+                stage2_duration_ms = 0  # No time spent, reusing cached data
+                logger.info(f"[STREAM] Reusing Stage 2 rankings from retry for conversation {captured_conversation_id}")
 
-            # Step 4: Save Stage 2 results immediately (incremental persistence)
-            metadata = {
-                "label_to_model": label_to_model,
-                "aggregate_rankings": aggregate_rankings,
-            }
-            storage.update_response_stage2(
-                response_id, stage2_results, stage2_duration_ms, metadata
-            )
-            logger.info(f"[STREAM] Saved stage2 results for response {response_id} (user message {user_message_id})")
+                # Still save to storage for consistency (in case Stage 3 fails again)
+                storage.update_response_stage2(
+                    response_id, stage2_results, stage2_duration_ms, metadata
+                )
+                logger.info(f"[STREAM] Saved reused stage2 results for response {response_id}")
 
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': metadata})}\n\n"
+                yield f"data: {json.dumps({'type': 'stage2_skipped', 'data': stage2_results, 'metadata': metadata, 'reused': True})}\n\n"
+            else:
+                # Normal flow: collect rankings from all models
+                yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                stage2_start = time.time()
+                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+                aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+                stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+                stage2_duration_sec = stage2_duration_ms / 1000
+                successful_rankings = len(stage2_results)
+                logger.info(f"[STREAM] Stage 2 completed in {stage2_duration_sec:.1f}s - {successful_rankings}/{len(copilot_models)} rankings received for conversation {captured_conversation_id}")
 
-            # Stage 3: Synthesize final answer
+                # Check for title after stage2 completes
+                title_event = await check_and_emit_title()
+                if title_event:
+                    yield title_event
+
+                # Step 4: Save Stage 2 results immediately (incremental persistence)
+                metadata = {
+                    "label_to_model": label_to_model,
+                    "aggregate_rankings": aggregate_rankings,
+                }
+                storage.update_response_stage2(
+                    response_id, stage2_results, stage2_duration_ms, metadata
+                )
+                logger.info(f"[STREAM] Saved stage2 results for response {response_id} (user message {user_message_id})")
+
+                yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': metadata})}\n\n"
+
+            # Check if we have any successful Stage 2 rankings
+            # If all ranking models failed, we cannot proceed to Stage 3 synthesis
+            if not stage2_results:
+                error_msg = "All ranking models failed to respond. Please try again later."
+                logger.error(f"[STREAM] Stage 2 failed - no rankings received for conversation {captured_conversation_id}")
+
+                # Cancel title_task if it exists and is still running
+                if title_task is not None and not title_task.done():
+                    title_task.cancel()
+                    try:
+                        await title_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                # Clean up the incomplete response placeholder
+                if response_id is not None:
+                    storage.delete_response_placeholder(response_id)
+                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage2', 'stage1_data': stage1_results})}\n\n"
+                return
+
+            # Stage 3: Synthesize final answer (always run - this is where we left off on retry)
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_start = time.time()
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
             stage3_duration_ms = int((time.time() - stage3_start) * 1000)
+            stage3_duration_sec = stage3_duration_ms / 1000
+            logger.info(f"[STREAM] Stage 3 completed in {stage3_duration_sec:.1f}s for conversation {captured_conversation_id}")
 
             # Check for title after stage3 completes
             title_event = await check_and_emit_title()
@@ -512,6 +617,12 @@ async def send_message_stream(
 
             # Send completion event with total timing
             total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
+            total_duration_sec = total_duration_ms / 1000
+            logger.info(
+                f"[STREAM] Deliberation completed for conversation {captured_conversation_id}: "
+                f"Stage1={stage1_duration_ms/1000:.1f}s, Stage2={stage2_duration_ms/1000:.1f}s, "
+                f"Stage3={stage3_duration_ms/1000:.1f}s, Total={total_duration_sec:.1f}s"
+            )
             yield f"data: {json.dumps({'type': 'complete', 'total_duration_ms': total_duration_ms})}\n\n"
 
         except Exception as e:
@@ -542,8 +653,10 @@ async def send_message_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Content-Type": "text/event-stream; charset=utf-8",
         }
     )
 

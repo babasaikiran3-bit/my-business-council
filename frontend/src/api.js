@@ -394,14 +394,30 @@ export const api = {
    * @param {Object} options - Additional options
    * @param {string|null} options.originalQuery - Original query before improvement (if prompt was improved)
    * @param {AbortSignal|null} options.signal - AbortController signal for cancellation
+   * @param {Object|null} options.completedStages - Previously completed stage data for smart retry
+   * @param {Array|null} options.completedStages.stage1 - Stage 1 responses to reuse
+   * @param {Array|null} options.completedStages.stage2 - Stage 2 rankings to reuse
+   * @param {Object|null} options.completedStages.stage2Metadata - Stage 2 metadata (label_to_model, aggregate_rankings)
    * @returns {Promise<void>}
    */
   async sendMessageStream(conversationId, content, onEvent, options = {}) {
-    const { originalQuery = null, signal = null } = options;
+    const { originalQuery = null, signal = null, completedStages = null } = options;
     const authHeaders = await this.getAuthHeaders();
     const body = { content };
     if (originalQuery) {
       body.original_query = originalQuery;
+    }
+    // Smart retry: include previously completed stage data to skip re-running them
+    if (completedStages) {
+      if (completedStages.stage1) {
+        body.stage1_data = completedStages.stage1;
+      }
+      if (completedStages.stage2) {
+        body.stage2_data = completedStages.stage2;
+      }
+      if (completedStages.stage2Metadata) {
+        body.stage2_metadata = completedStages.stage2Metadata;
+      }
     }
 
     const fetchOptions = {
@@ -502,6 +518,7 @@ export const api = {
         if (done) break;
 
         const chunk = decoder.decode(value);
+        console.log('[SSE] Received chunk:', chunk.substring(0, 200) + (chunk.length > 200 ? '...' : ''));
         const lines = chunk.split('\n');
 
         for (const line of lines) {
@@ -509,9 +526,10 @@ export const api = {
             const data = line.slice(6);
             try {
               const event = JSON.parse(data);
+              console.log('[SSE] Parsed event:', event.type, event);
               onEvent(event.type, event);
             } catch (e) {
-              console.error('Failed to parse SSE event:', e);
+              console.error('[SSE] Failed to parse SSE event:', e, 'data:', data.substring(0, 100));
             }
           }
         }

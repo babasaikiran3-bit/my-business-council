@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2, XCircle, Clock, Square } from "lucide-react";
@@ -9,6 +10,68 @@ import { cn } from "@/lib/utils";
 function formatTime(ms) {
   if (!ms || ms <= 0) return "0.0s";
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Self-updating timer component that owns its own interval.
+ * This prevents parent components from needing to update state every 500ms
+ * for timer display, reducing unnecessary re-renders.
+ *
+ * @param {Object} props
+ * @param {number} props.startTime - Unix timestamp when the timer started
+ * @param {boolean} props.completed - Whether the stage is completed
+ * @param {number} [props.finalElapsed] - Final elapsed time (used when completed)
+ * @param {number} [props.updateInterval=500] - How often to update the display (ms)
+ */
+export function StageTimer({ startTime, completed, finalElapsed, updateInterval = 500 }) {
+  const [elapsed, setElapsed] = useState(() => {
+    if (completed && finalElapsed != null) return finalElapsed;
+    if (startTime) return Date.now() - startTime;
+    return 0;
+  });
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    // If completed, use the final elapsed time and don't start interval
+    if (completed) {
+      if (finalElapsed != null) {
+        setElapsed(finalElapsed);
+      }
+      return;
+    }
+
+    // If not started yet, nothing to do
+    if (!startTime) {
+      setElapsed(0);
+      return;
+    }
+
+    // Start the interval for live updates
+    intervalRef.current = setInterval(() => {
+      setElapsed(Date.now() - startTime);
+    }, updateInterval);
+
+    // Initial update
+    setElapsed(Date.now() - startTime);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [startTime, completed, finalElapsed, updateInterval]);
+
+  const timeDisplay = completed
+    ? `Completed in ${formatTime(elapsed)}`
+    : formatTime(elapsed);
+
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Clock className="h-3.5 w-3.5" />
+      <span className="font-mono">{timeDisplay}</span>
+    </div>
+  );
 }
 
 /**
@@ -64,7 +127,8 @@ function ModelStatus({ model, status }) {
 }
 
 /**
- * Stage 1 progress indicator with individual model statuses
+ * Stage 1 progress indicator with individual model statuses.
+ * Uses StageTimer for self-updating elapsed time display.
  */
 export function Stage1Progress({ modelStatuses, timing, onCancel }) {
   const models = Object.keys(modelStatuses);
@@ -74,11 +138,28 @@ export function Stage1Progress({ modelStatuses, timing, onCancel }) {
   const failedCount = Object.values(modelStatuses).filter(
     (s) => s === "failed"
   ).length;
+  const processingCount = Object.values(modelStatuses).filter(
+    (s) => s === "processing"
+  ).length;
   const totalCount = models.length;
+  const completedCount = receivedCount + failedCount;
 
-  const timeDisplay = timing.completed
-    ? `Completed in ${formatTime(timing.elapsed)}`
-    : formatTime(timing.elapsed);
+  // Determine the status summary text and styling
+  const getStatusSummary = () => {
+    if (timing.completed) {
+      if (failedCount === 0) {
+        return { text: `${receivedCount}/${totalCount} succeeded`, className: "text-green-600" };
+      } else if (receivedCount === 0) {
+        return { text: `All ${totalCount} models failed`, className: "text-red-500" };
+      } else {
+        return { text: `${receivedCount} succeeded, ${failedCount} failed`, className: "text-amber-600" };
+      }
+    } else {
+      return { text: `${completedCount}/${totalCount} models`, className: "text-muted-foreground" };
+    }
+  };
+
+  const statusSummary = getStatusSummary();
 
   return (
     <Card className="border-dashed">
@@ -86,22 +167,29 @@ export function Stage1Progress({ modelStatuses, timing, onCancel }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {timing.completed ? (
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              failedCount > 0 && receivedCount === 0 ? (
+                <XCircle className="h-4 w-4 text-red-500" />
+              ) : failedCount > 0 ? (
+                <CheckCircle2 className="h-4 w-4 text-amber-500" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              )
             ) : (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
             <span className="text-sm font-medium">
               Stage 1: Collecting responses
             </span>
-            <span className="text-xs text-muted-foreground">
-              ({receivedCount + failedCount}/{totalCount} models)
+            <span className={cn("text-xs", statusSummary.className)}>
+              ({statusSummary.text})
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              <span className="font-mono">{timeDisplay}</span>
-            </div>
+            <StageTimer
+              startTime={timing.startTime}
+              completed={timing.completed}
+              finalElapsed={timing.elapsed}
+            />
             {!timing.completed && onCancel && (
               <Button
                 variant="ghost"
@@ -154,13 +242,10 @@ function getStageStyle(stage) {
 }
 
 /**
- * Generic stage loading indicator with timer
+ * Generic stage loading indicator with timer.
+ * Uses StageTimer for self-updating elapsed time display.
  */
 export function StageProgress({ stage, label, timing, onCancel }) {
-  const timeDisplay = timing.completed
-    ? `Completed in ${formatTime(timing.elapsed)}`
-    : formatTime(timing.elapsed);
-
   const stageStyle = getStageStyle(stage);
 
   return (
@@ -181,10 +266,11 @@ export function StageProgress({ stage, label, timing, onCancel }) {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              <span className="font-mono">{timeDisplay}</span>
-            </div>
+            <StageTimer
+              startTime={timing.startTime}
+              completed={timing.completed}
+              finalElapsed={timing.elapsed}
+            />
             {!timing.completed && onCancel && (
               <Button
                 variant="ghost"

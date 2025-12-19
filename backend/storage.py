@@ -198,11 +198,14 @@ def _convert_joined_row_to_messages(row: Dict[str, Any]) -> List[Dict[str, Any]]
         response = response_data[0]
 
     if response:
+        # Only include stage3 if it has actual data (not None or empty)
+        # This prevents "Chairman: Unknown" from showing for incomplete responses
+        stage3_data = response.get("stage3_synthesis")
         messages.append({
             "role": "assistant",
             "stage1": response.get("stage1_responses") or [],
             "stage2": response.get("stage2_evaluations") or [],
-            "stage3": response.get("stage3_synthesis") or {},
+            "stage3": stage3_data if stage3_data else None,
         })
 
     return messages
