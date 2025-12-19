@@ -1,15 +1,6 @@
 import ReactMarkdown from 'react-markdown';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { CheckCircle2, Clock } from "lucide-react"
+import StageCard from './StageCard'
 import { getModelDisplayName } from "@/lib/utils"
-
-/**
- * Format elapsed time in seconds with 1 decimal place
- */
-function formatTime(ms) {
-  if (!ms || ms <= 0) return "0.0s";
-  return `${(ms / 1000).toFixed(1)}s`;
-}
 
 export default function Stage3({ finalResponse, timing }) {
   if (!finalResponse) {
@@ -17,35 +8,21 @@ export default function Stage3({ finalResponse, timing }) {
   }
 
   return (
-    <Card className="bg-muted/30">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <CardTitle className="text-sm font-medium">Stage 3: Final Copilot Answer</CardTitle>
-          </div>
-          {timing && timing.elapsed > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              <span className="font-mono">Completed in {formatTime(timing.elapsed)}</span>
-            </div>
-          )}
-        </div>
-        <CardDescription className="text-xs font-mono">
-          Chairman: {getModelDisplayName(finalResponse.model)}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="markdown-content">
-          {finalResponse.response ? (
-            <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
-          ) : (
-            <p className="text-muted-foreground italic">
-              No response generated. This may happen if the combined context from Stage 1 and Stage 2 exceeded the model&apos;s context limit.
-            </p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <StageCard
+      title="Stage 3: Final Copilot Answer"
+      description={<span className="font-mono">Chairman: {getModelDisplayName(finalResponse.model)}</span>}
+      timing={timing}
+      highlighted
+    >
+      <div className="markdown-content">
+        {finalResponse.response ? (
+          <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
+        ) : (
+          <p className="text-muted-foreground italic">
+            No response generated. This may happen if the combined context from Stage 1 and Stage 2 exceeded the model&apos;s context limit.
+          </p>
+        )}
+      </div>
+    </StageCard>
   );
 }

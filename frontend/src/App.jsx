@@ -41,26 +41,69 @@ function AuthenticatedApp() {
     setFeatureParams(params);
   };
 
+  /**
+   * Render the active feature wrapped in its own ErrorBoundary.
+   * This ensures errors in one feature don't crash the entire dashboard.
+   */
   const renderFeature = () => {
+    // Use key prop to reset ErrorBoundary when switching features
+    const boundaryKey = `feature-${activeFeature}`;
+
     switch (activeFeature) {
       case 'home':
-        return <HomeFeature onNavigate={handleFeatureChange} />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <HomeFeature onNavigate={handleFeatureChange} />
+          </ErrorBoundary>
+        );
       case 'copilot':
-        return <CopilotFeature initialConversationId={featureParams.conversationId} />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <CopilotFeature initialConversationId={featureParams.conversationId} />
+          </ErrorBoundary>
+        );
       case 'analytics':
-        return <PlaceholderFeature title="Analytics" description="Monitor AI usage and performance metrics." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Analytics" description="Monitor AI usage and performance metrics." />
+          </ErrorBoundary>
+        );
       case 'reports':
-        return <PlaceholderFeature title="Reports" description="Generate and export operational reports." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Reports" description="Generate and export operational reports." />
+          </ErrorBoundary>
+        );
       case 'workflows':
-        return <PlaceholderFeature title="Workflows" description="Create and manage automated AI workflows." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Workflows" description="Create and manage automated AI workflows." />
+          </ErrorBoundary>
+        );
       case 'team':
-        return <PlaceholderFeature title="Team Management" description="Manage team members and permissions." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Team Management" description="Manage team members and permissions." />
+          </ErrorBoundary>
+        );
       case 'security':
-        return <PlaceholderFeature title="Security" description="Configure security settings and audit logs." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Security" description="Configure security settings and audit logs." />
+          </ErrorBoundary>
+        );
       case 'settings':
-        return <PlaceholderFeature title="Settings" description="Configure application settings and preferences." />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <PlaceholderFeature title="Settings" description="Configure application settings and preferences." />
+          </ErrorBoundary>
+        );
       default:
-        return <HomeFeature onNavigate={handleFeatureChange} />;
+        return (
+          <ErrorBoundary key={boundaryKey}>
+            <HomeFeature onNavigate={handleFeatureChange} />
+          </ErrorBoundary>
+        );
     }
   };
 

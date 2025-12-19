@@ -2,15 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2, XCircle, Clock, Square } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-/**
- * Format elapsed time in seconds with 1 decimal place
- */
-function formatTime(ms) {
-  if (!ms || ms <= 0) return "0.0s";
-  return `${(ms / 1000).toFixed(1)}s`;
-}
+import { cn, formatTime, getModelDisplayName } from "@/lib/utils";
 
 /**
  * Self-updating timer component that owns its own interval.
@@ -72,15 +64,6 @@ export function StageTimer({ startTime, completed, finalElapsed, updateInterval 
       <span className="font-mono">{timeDisplay}</span>
     </div>
   );
-}
-
-/**
- * Get display name for a model (truncate long model names)
- */
-function getModelDisplayName(model) {
-  // Remove provider prefix for cleaner display
-  const parts = model.split("/");
-  return parts.length > 1 ? parts[1] : model;
 }
 
 /**

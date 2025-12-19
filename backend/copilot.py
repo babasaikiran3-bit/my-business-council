@@ -2,10 +2,17 @@
 
 import logging
 from typing import List, Dict, Any, Tuple, Callable, Optional
-from .openrouter import query_models_parallel, query_model, query_models_parallel_with_progress
+
+from .llm import get_default_provider, LLMResponse
 from .config import COPILOT_MODELS, CHAIRMAN_MODEL, PROMPT_IMPROVER_MODEL
+from .prompts import get_prompt, format_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def _get_provider():
+    """Get the default LLM provider."""
+    return get_default_provider()
 
 
 def get_copilot_models() -> List[str]:
@@ -23,23 +30,16 @@ async def improve_user_prompt(original_prompt: str) -> str:
     Returns:
         The improved prompt text
     """
-    system_prompt = """You are a prompt improvement specialist. Your task is to rewrite the user's prompt to be:
-- Clearer and more specific
-- Well-structured with context where helpful
-- More likely to elicit comprehensive, high-quality responses
-
-Rules:
-- Preserve the user's original intent completely
-- Return ONLY the improved prompt text, no explanations or preamble
-- If the prompt is already excellent, return it unchanged"""
+    system_prompt = get_prompt("prompt_improver")
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": original_prompt}
     ]
 
-    response = await query_model(PROMPT_IMPROVER_MODEL, messages)
-    return response.get('content', original_prompt) if response else original_prompt
+    provider = _get_provider()
+    response = await provider.query(PROMPT_IMPROVER_MODEL, messages)
+    return response.content if response and response.content else original_prompt
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -55,15 +55,16 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COPILOT_MODELS, messages)
+    provider = _get_provider()
+    responses = await provider.query_parallel(COPILOT_MODELS, messages)
 
     # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        if response is not None and response.success:  # Only include successful responses
             stage1_results.append({
                 "model": model,
-                "response": response.get('content', '')
+                "response": response.content or ''
             })
 
     return stage1_results
@@ -86,9 +87,9 @@ async def stage1_collect_responses_with_progress(
     messages = [{"role": "user", "content": user_query}]
     stage1_results = []
 
-    async def handle_model_complete(model: str, response: Optional[Dict], success: bool, elapsed_ms: int):
-        if success and response:
-            content = response.get('content', '')
+    async def handle_model_complete(model: str, response: Optional[LLMResponse], success: bool, elapsed_ms: int):
+        if success and response and response.success:
+            content = response.content or ''
             stage1_results.append({
                 "model": model,
                 "response": content
@@ -100,7 +101,8 @@ async def stage1_collect_responses_with_progress(
                 await on_model_complete(model, None, False, elapsed_ms)
 
     # Query all models in parallel with progress
-    await query_models_parallel_with_progress(COPILOT_MODELS, messages, handle_model_complete)
+    provider = _get_provider()
+    await provider.query_parallel_with_progress(COPILOT_MODELS, messages, handle_model_complete)
 
     return stage1_results
 
@@ -134,47 +136,23 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     ])
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
-
-Question: {user_query}
-
-Here are the responses from different models (anonymized):
-
-{responses_text}
-
-Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
-
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
-
-Example of the correct format for your ENTIRE response:
-
-Response A provides good detail on X but misses Y...
-Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
-
-FINAL RANKING:
-1. Response C
-2. Response A
-3. Response B
-
-Now provide your evaluation and ranking:"""
+    ranking_prompt = format_prompt(
+        "stage2_ranking",
+        user_query=user_query,
+        responses_text=responses_text
+    )
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all copilot models in parallel
-    responses = await query_models_parallel(COPILOT_MODELS, messages)
+    provider = _get_provider()
+    responses = await provider.query_parallel(COPILOT_MODELS, messages)
 
     # Format results
     stage2_results = []
     for model, response in responses.items():
-        if response is not None:
-            full_text = response.get('content', '')
+        if response is not None and response.success:
+            full_text = response.content or ''
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
                 "model": model,
@@ -247,29 +225,20 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Lead Synthesizer for Eternal Copilot. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
-
-Original Question: {user_query}
-
-STAGE 1 - Individual Responses:
-{stage1_text}
-
-STAGE 2 - Peer Rankings:
-{stage2_text}
-
-Your task as Lead Synthesizer is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
-
-Provide a clear, well-reasoned final answer that represents the copilot's collective wisdom:"""
+    chairman_prompt = format_prompt(
+        "stage3_chairman",
+        user_query=user_query,
+        stage1_text=stage1_text,
+        stage2_text=stage2_text
+    )
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
     logger.info(f"[STAGE3] Querying chairman model: {CHAIRMAN_MODEL}")
     logger.info(f"[STAGE3] Chairman prompt size: {len(chairman_prompt)} chars (~{len(chairman_prompt) // 4} tokens)")
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    provider = _get_provider()
+    response = await provider.query(CHAIRMAN_MODEL, messages)
     logger.info(f"[STAGE3] Chairman response received: {response}")
 
     if response is None:
@@ -280,7 +249,7 @@ Provide a clear, well-reasoned final answer that represents the copilot's collec
             "response": "Error: Unable to generate final synthesis."
         }
 
-    content = response.get('content') or ''
+    content = response.content or ''
     if not content:
         logger.warning(f"[STAGE3] Chairman response content is empty. Full response: {response}")
 
@@ -381,23 +350,19 @@ async def generate_conversation_title(user_query: str) -> str:
     Returns:
         A short title (3-5 words)
     """
-    title_prompt = f"""Generate a very short title (3-5 words maximum) that summarizes the following question.
-The title should be concise and descriptive. Do not use quotes or punctuation in the title.
-
-Question: {user_query}
-
-Title:"""
+    title_prompt = format_prompt("title_generation", user_query=user_query)
 
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use grok-4.1-fast for title generation (fast response times)
-    response = await query_model("x-ai/grok-4.1-fast", messages, timeout=30.0)
+    provider = _get_provider()
+    response = await provider.query("x-ai/grok-4.1-fast", messages, timeout=30.0)
 
-    if response is None:
+    if response is None or not response.success:
         # Fallback to a generic title
         return "New Conversation"
 
-    title = response.get('content', 'New Conversation').strip()
+    title = (response.content or 'New Conversation').strip()
 
     # Clean up the title - remove quotes, limit length
     title = title.strip('"\'')

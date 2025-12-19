@@ -36,28 +36,70 @@ function getResumeStageInfo(msg) {
   }
 }
 
+/**
+ * ChatInterface - Main chat component for the Copilot feature.
+ *
+ * Props are organized into logical groups:
+ * - Core props: conversation, onSendMessage
+ * - Loading state: streamingState object
+ * - Error handling: errorHandlers object
+ * - Polling/recovery: pollingState object
+ * - Resume: resumeState object
+ *
+ * For backwards compatibility, individual props are also supported.
+ */
 export default function ChatInterface({
+  // Core props
   conversation,
   onSendMessage,
-  isLoading,
   isCreatingConversation = false,
-  stageTimings,
-  modelStatuses,
-  modelTimings,
-  currentError,
-  onRetry,
-  onClearError,
-  onCancelStream,
-  // Polling state for recovery after browser refresh
-  pollingStatus = null,
-  pollingResponseId = null,
-  onStopPolling = null,
-  onCancelDeliberation = null,
-  isCancellingDeliberation = false,
-  // Resume functionality for failed persisted responses
-  onResumeDeliberation = null,
-  resumingResponseId = null,
+
+  // Streaming state (can be passed as object or individual props)
+  streamingState,
+  isLoading: isLoadingProp,
+  stageTimings: stageTimingsProp,
+  modelStatuses: modelStatusesProp,
+  modelTimings: modelTimingsProp,
+
+  // Error state and handlers (can be passed as object or individual props)
+  errorHandlers,
+  currentError: currentErrorProp,
+  onRetry: onRetryProp,
+  onClearError: onClearErrorProp,
+  onCancelStream: onCancelStreamProp,
+
+  // Polling state for recovery after browser refresh (can be passed as object or individual props)
+  pollingState,
+  pollingStatus: pollingStatusProp = null,
+  pollingResponseId: pollingResponseIdProp = null,
+  onStopPolling: onStopPollingProp = null,
+  onCancelDeliberation: onCancelDeliberationProp = null,
+  isCancellingDeliberation: isCancellingDeliberationProp = false,
+
+  // Resume functionality for failed persisted responses (can be passed as object or individual props)
+  resumeState,
+  onResumeDeliberation: onResumeDeliberationProp = null,
+  resumingResponseId: resumingResponseIdProp = null,
 }) {
+  // Destructure grouped props with fallback to individual props (backwards compatibility)
+  const isLoading = streamingState?.isLoading ?? isLoadingProp ?? false
+  const stageTimings = streamingState?.stageTimings ?? stageTimingsProp
+  const modelStatuses = streamingState?.modelStatuses ?? modelStatusesProp ?? {}
+  const modelTimings = streamingState?.modelTimings ?? modelTimingsProp ?? {}
+
+  const currentError = errorHandlers?.currentError ?? currentErrorProp
+  const onRetry = errorHandlers?.onRetry ?? onRetryProp
+  const onClearError = errorHandlers?.onClearError ?? onClearErrorProp
+  const onCancelStream = errorHandlers?.onCancelStream ?? onCancelStreamProp
+
+  const pollingStatus = pollingState?.status ?? pollingStatusProp
+  const pollingResponseId = pollingState?.responseId ?? pollingResponseIdProp
+  const onStopPolling = pollingState?.onStop ?? onStopPollingProp
+  const onCancelDeliberation = pollingState?.onCancel ?? onCancelDeliberationProp
+  const isCancellingDeliberation = pollingState?.isCancelling ?? isCancellingDeliberationProp ?? false
+
+  const onResumeDeliberation = resumeState?.onResume ?? onResumeDeliberationProp
+  const resumingResponseId = resumeState?.resumingId ?? resumingResponseIdProp
   const [input, setInput] = useState('');
   const [isImproving, setIsImproving] = useState(false);
   const [originalPrompt, setOriginalPrompt] = useState(null);

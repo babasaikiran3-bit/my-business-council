@@ -36,7 +36,7 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
-        assert "Eternal Copilot" in data["service"]
+        assert "eternal-copilot" in data["service"]
 
 
 class TestConversationEndpoints:

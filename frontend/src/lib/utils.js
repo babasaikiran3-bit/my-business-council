@@ -6,6 +6,18 @@ export function cn(...inputs) {
 }
 
 /**
+ * Format elapsed time in milliseconds to a human-readable string.
+ * E.g., 1500 -> "1.5s", 0 -> "0.0s", null -> "0.0s"
+ *
+ * @param {number|null|undefined} ms - Elapsed time in milliseconds
+ * @returns {string} Formatted time string with 1 decimal place
+ */
+export function formatTime(ms) {
+  if (!ms || ms <= 0) return "0.0s";
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
  * Extract display name from model identifier.
  * E.g., "openai/gpt-4" -> "gpt-4", "gpt-4" -> "gpt-4", null -> "Unknown"
  *

@@ -1,8 +1,7 @@
 import ReactMarkdown from 'react-markdown';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn, getModelDisplayName } from "@/lib/utils"
-import { CheckCircle2, Clock } from "lucide-react"
+import StageCard from './StageCard'
 
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
@@ -14,39 +13,20 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-/**
- * Format elapsed time in seconds with 1 decimal place
- */
-function formatTime(ms) {
-  if (!ms || ms <= 0) return "0.0s";
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
 export default function Stage2({ rankings, labelToModel, aggregateRankings, timing }) {
   if (!rankings || rankings.length === 0) {
     return null;
   }
 
+  const description = `${rankings.length} models evaluated responses anonymously. Model names shown in bold for readability.`
+
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <CardTitle className="text-sm font-medium">Stage 2: Peer Rankings</CardTitle>
-          </div>
-          {timing && timing.elapsed > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              <span className="font-mono">Completed in {formatTime(timing.elapsed)}</span>
-            </div>
-          )}
-        </div>
-        <CardDescription className="text-xs">
-          {rankings.length} models evaluated responses anonymously. Model names shown in bold for readability.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <StageCard
+      title="Stage 2: Peer Rankings"
+      description={description}
+      timing={timing}
+    >
+      <div className="space-y-4">
         <div>
           <h4 className="text-sm font-medium mb-2">Raw Evaluations</h4>
           <Tabs defaultValue="0" className="w-full">
@@ -122,7 +102,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, timi
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </StageCard>
   );
 }

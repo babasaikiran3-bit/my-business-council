@@ -4,6 +4,15 @@ import { api } from '../../api'
 import { isConnectionError } from '@/contexts/ConnectionErrorContext'
 import ConversationSidebar from './copilot/ConversationSidebar'
 import ChatInterface from '../ChatInterface'
+import {
+  useConversations,
+  DEFAULT_STAGE_TIMINGS,
+  STREAM_TIMEOUT_MS,
+  MAX_SIMULTANEOUS_STREAMS,
+  STALE_CHECK_INTERVAL_MS,
+  STALE_THRESHOLD_MS,
+  createInitialStreamState,
+} from '@/hooks'
 
 /**
  * CopilotFeature - The 3-stage LLM deliberation feature.
@@ -23,22 +32,6 @@ import ChatInterface from '../ChatInterface'
  * @param {Object} props
  * @param {string} props.initialConversationId - Optional conversation ID to load on mount (from search)
  */
-
-// Default stage timings structure (used for initialization and reset)
-const DEFAULT_STAGE_TIMINGS = {
-  stage1: { startTime: null, elapsed: 0, completed: false },
-  stage2: { startTime: null, elapsed: 0, completed: false },
-  stage3: { startTime: null, elapsed: 0, completed: false },
-}
-
-// Timeout for streams that receive no events (prevents stuck UI during network issues)
-// Set to 8 minutes to accommodate slow models like openai/gpt-5.2-pro which can take 6+ minutes.
-// This should be slightly longer than the backend timeout (480s) to allow for network latency.
-// Note: this timeout resets on each event received.
-const STREAM_TIMEOUT_MS = 480000 // 8 minutes
-
-// Maximum number of simultaneous streams to prevent resource exhaustion
-const MAX_SIMULTANEOUS_STREAMS = 5
 
 // Valid in-progress status values (deliberation not yet complete or failed)
 const IN_PROGRESS_STATUSES = [
@@ -80,44 +73,23 @@ const getStageFromStatus = (status) => {
   }
 }
 
-/**
- * Creates a fresh stream state object for a conversation.
- * @param {Object} conversation - The conversation object to associate with this stream
- * @returns {Object} Initial stream state
- */
-const createInitialStreamState = (conversation) => ({
-  isLoading: true,
-  stageTimings: { ...DEFAULT_STAGE_TIMINGS },
-  modelStatuses: {},
-  modelTimings: {},
-  // Accumulate partial Stage 1 responses as they arrive (for smart retry on mid-stage errors)
-  partialStage1Responses: [],
-  error: null,
-  // Store full conversation state to preserve in-progress messages during background processing
-  conversation: conversation ? { ...conversation } : null,
-  // Track when the last event was received - used for stale stream detection
-  lastEventTime: Date.now(),
-})
-
-// How often to check for stale streams (30 seconds)
-const STALE_CHECK_INTERVAL_MS = 30000
-// How long a stream can go without events before being considered stale (8 minutes)
-// Set to 8 minutes to accommodate slow models like openai/gpt-5.2-pro which can take 6+ minutes.
-// This should match STREAM_TIMEOUT_MS to ensure consistent timeout behavior.
-const STALE_THRESHOLD_MS = 480000
-
-// Pagination constants
-const CONVERSATIONS_PAGE_SIZE = 10
+// Note: STALE_CHECK_INTERVAL_MS and STALE_THRESHOLD_MS are imported from @/hooks
+// to ensure consistent timeout configuration across the codebase.
 
 export default function CopilotFeature({ initialConversationId }) {
   // ============================================================================
-  // CONVERSATION LIST STATE (with pagination)
+  // CONVERSATION LIST STATE (with pagination) - extracted to useConversations hook
   // ============================================================================
-  const [conversations, setConversations] = useState([])
-  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [hasMoreConversations, setHasMoreConversations] = useState(true)
-  const [conversationsOffset, setConversationsOffset] = useState(0)
+  const {
+    conversations,
+    isLoadingConversations,
+    isLoadingMore,
+    hasMoreConversations,
+    loadConversations,
+    loadMoreConversations,
+    addConversation,
+    updateConversation: updateConversationInList,
+  } = useConversations()
 
   // ============================================================================
   // CURRENT CONVERSATION STATE (what's visible in the UI)
@@ -209,6 +181,12 @@ export default function CopilotFeature({ initialConversationId }) {
   const modelStatuses = currentStreamState?.modelStatuses || {}
   const modelTimings = currentStreamState?.modelTimings || {}
   const currentError = currentStreamState?.error || null
+
+  // CRITICAL: When an active stream exists, use its conversation directly to keep
+  // stageTimings and msg.loading in sync. This prevents race conditions where
+  // stageTimings.stage3 updates but msg.loading.stage3 hasn't propagated yet
+  // (due to the useEffect sync delay for currentConversation state).
+  const activeConversation = currentStreamState?.conversation || currentConversation
 
   // ============================================================================
   // STREAM STATE MANAGEMENT HELPERS
@@ -450,47 +428,6 @@ export default function CopilotFeature({ initialConversationId }) {
 
     return () => clearInterval(cleanupInterval)
   }, [])
-
-  const loadConversations = async () => {
-    setIsLoadingConversations(true)
-    try {
-      const result = await api.listConversations({ limit: CONVERSATIONS_PAGE_SIZE, offset: 0 })
-      setConversations(result.conversations)
-      setHasMoreConversations(result.has_more)
-      setConversationsOffset(result.conversations.length)
-    } catch (error) {
-      console.error('Failed to load conversations:', error)
-      // Skip toast for connection errors - the ConnectionErrorBanner handles those
-      if (!isConnectionError(error)) {
-        toast.error('Failed to load conversations')
-      }
-    } finally {
-      setIsLoadingConversations(false)
-    }
-  }
-
-  const loadMoreConversations = async () => {
-    if (isLoadingMore || !hasMoreConversations) return
-
-    setIsLoadingMore(true)
-    try {
-      const result = await api.listConversations({
-        limit: CONVERSATIONS_PAGE_SIZE,
-        offset: conversationsOffset
-      })
-      setConversations(prev => [...prev, ...result.conversations])
-      setHasMoreConversations(result.has_more)
-      setConversationsOffset(prev => prev + result.conversations.length)
-    } catch (error) {
-      console.error('Failed to load more conversations:', error)
-      // Skip toast for connection errors - the ConnectionErrorBanner handles those
-      if (!isConnectionError(error)) {
-        toast.error('Failed to load more conversations')
-      }
-    } finally {
-      setIsLoadingMore(false)
-    }
-  }
 
   // Ref to track active polling intervals (conversationId -> intervalId)
   const pollingIntervalsRef = useRef(new Map())
@@ -1149,11 +1086,13 @@ export default function CopilotFeature({ initialConversationId }) {
         try {
           const newConv = await api.createConversation()
           conversationId = newConv.id
-          // Add to conversation list
-          setConversations((prev) => [
-            { id: newConv.id, created_at: newConv.created_at, title: newConv.title, message_count: 0 },
-            ...prev,
-          ])
+          // Add to conversation list (using hook function)
+          addConversation({
+            id: newConv.id,
+            created_at: newConv.created_at,
+            title: newConv.title,
+            message_count: 0,
+          })
           // Update current conversation with the new ID
           setCurrentConversationId(newConv.id)
           setCurrentConversation((prev) => ({
@@ -1753,26 +1692,36 @@ export default function CopilotFeature({ initialConversationId }) {
         onLoadMore={loadMoreConversations}
       />
       <ChatInterface
-        conversation={currentConversation}
+        conversation={activeConversation}
         onSendMessage={handleSendMessage}
-        isLoading={isLoading}
         isCreatingConversation={isCreatingConversation}
-        stageTimings={stageTimings}
-        modelStatuses={modelStatuses}
-        modelTimings={modelTimings}
-        currentError={currentError}
-        onRetry={handleRetryMessage}
-        onClearError={handleClearError}
-        onCancelStream={handleCancelStream}
-        // Polling state for recovery after browser refresh
-        pollingStatus={currentConversationId ? pollingConversations[currentConversationId]?.status : null}
-        pollingResponseId={currentConversationId ? pollingConversations[currentConversationId]?.responseId : null}
-        onStopPolling={currentConversationId ? () => stopPolling(currentConversationId) : null}
-        onCancelDeliberation={currentConversationId ? (responseId) => handleCancelDeliberation(currentConversationId, responseId) : null}
-        isCancellingDeliberation={currentConversationId ? !!cancellingConversations[currentConversationId] : false}
-        // Resume functionality for failed persisted responses
-        onResumeDeliberation={handleResumeDeliberation}
-        resumingResponseId={Object.keys(resumingResponses).find(id => resumingResponses[id]) || null}
+        // Grouped streaming state
+        streamingState={{
+          isLoading,
+          stageTimings,
+          modelStatuses,
+          modelTimings,
+        }}
+        // Grouped error handlers
+        errorHandlers={{
+          currentError,
+          onRetry: handleRetryMessage,
+          onClearError: handleClearError,
+          onCancelStream: handleCancelStream,
+        }}
+        // Grouped polling state for recovery after browser refresh
+        pollingState={{
+          status: currentConversationId ? pollingConversations[currentConversationId]?.status : null,
+          responseId: currentConversationId ? pollingConversations[currentConversationId]?.responseId : null,
+          onStop: currentConversationId ? () => stopPolling(currentConversationId) : null,
+          onCancel: currentConversationId ? (responseId) => handleCancelDeliberation(currentConversationId, responseId) : null,
+          isCancelling: currentConversationId ? !!cancellingConversations[currentConversationId] : false,
+        }}
+        // Grouped resume state
+        resumeState={{
+          onResume: handleResumeDeliberation,
+          resumingId: Object.keys(resumingResponses).find(id => resumingResponses[id]) || null,
+        }}
       />
     </div>
   )
