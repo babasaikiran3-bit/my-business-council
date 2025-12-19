@@ -147,6 +147,12 @@ class ConversationMetadata(BaseModel):
     message_count: int
 
 
+class PaginatedConversations(BaseModel):
+    """Paginated list of conversations."""
+    conversations: List[ConversationMetadata]
+    has_more: bool
+
+
 class Conversation(BaseModel):
     """Full conversation with all messages."""
     id: str
@@ -206,10 +212,24 @@ async def improve_prompt(
     return {"improved_prompt": improved}
 
 
-@app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations(user: AuthenticatedUser = Depends(get_current_user)):
-    """List all conversations for the authenticated user (metadata only)."""
-    return storage.list_conversations(user_id=user.id)
+@app.get("/api/conversations", response_model=PaginatedConversations)
+async def list_conversations(
+    limit: int = 10,
+    offset: int = 0,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    List conversations for the authenticated user with pagination.
+
+    Args:
+        limit: Maximum number of conversations to return (default: 10, max: 50)
+        offset: Number of conversations to skip for pagination (default: 0)
+    """
+    # Enforce reasonable limits
+    limit = min(max(1, limit), 50)
+    offset = max(0, offset)
+
+    return storage.list_conversations(user_id=user.id, limit=limit, offset=offset)
 
 
 @app.post("/api/conversations", response_model=Conversation)
@@ -230,6 +250,399 @@ async def get_conversation(
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+@app.get("/api/responses/{response_id}/partial-stages")
+async def get_partial_stages(
+    response_id: str,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Get partial stage data for a response (for smart retry).
+
+    Returns the response status and any partial model responses that were
+    saved before the deliberation failed. This enables smart retry to
+    reuse successful model responses without making duplicate API calls.
+    """
+    result = storage.get_response_with_partial_stages(response_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Verify user owns this response by checking the conversation ownership
+    response = result["response"]
+    user_message_id = response.get("user_message_id")
+    if not user_message_id:
+        # Response has no linked message - should not happen in normal operation
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Get the message to find the conversation
+    supabase = storage.get_supabase_client()
+    msg_result = (
+        supabase.table("messages")
+        .select("conversation_id")
+        .eq("id", user_message_id)
+        .execute()
+    )
+    if not msg_result.data:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    conv_id = msg_result.data[0]["conversation_id"]
+    # Verify ownership using storage module's helper
+    if not storage._verify_conversation_ownership(conv_id, user.id):
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    return {
+        "response_id": response_id,
+        "response_status": response.get("response_status", "unknown"),
+        "error_details": response.get("error_details"),
+        "stage1_responses": response.get("stage1_responses"),
+        "stage2_evaluations": response.get("stage2_evaluations"),
+        "metadata": response.get("metadata"),
+        "partial_stages": result["partial_stages"],
+    }
+
+
+@app.post("/api/responses/{response_id}/cancel")
+async def cancel_response(
+    response_id: str,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Cancel/abort a stale or orphaned deliberation.
+
+    This endpoint marks an in-progress response as 'failed' so the user can retry.
+    It's used when:
+    - The browser was refreshed during a deliberation and the backend process died
+    - A deliberation has been stuck for too long
+    - The user wants to manually abort a stale deliberation
+
+    Only in-progress responses can be cancelled. Already completed or failed
+    responses cannot be cancelled.
+    """
+    supabase = storage.get_supabase_client()
+
+    # Fetch the response to check its current status and verify ownership
+    response_result = (
+        supabase.table("assistant_responses")
+        .select("id, response_status, user_message_id")
+        .eq("id", response_id)
+        .execute()
+    )
+
+    if not response_result.data:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    response = response_result.data[0]
+
+    # Verify ownership by checking the conversation belongs to this user
+    msg_result = (
+        supabase.table("messages")
+        .select("conversation_id")
+        .eq("id", response["user_message_id"])
+        .execute()
+    )
+
+    if not msg_result.data:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    conv_id = msg_result.data[0]["conversation_id"]
+    if not storage._verify_conversation_ownership(conv_id, user.id):
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Check if the response is in an in-progress state
+    in_progress_statuses = [
+        'pending', 'stage1_in_progress', 'stage1_complete',
+        'stage2_in_progress', 'stage2_complete', 'stage3_in_progress'
+    ]
+
+    current_status = response.get("response_status")
+    if current_status not in in_progress_statuses:
+        if current_status == 'complete':
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot cancel a completed deliberation"
+            )
+        elif current_status == 'failed':
+            # Already failed, just return success
+            return {
+                "success": True,
+                "response_id": response_id,
+                "previous_status": current_status,
+                "new_status": "failed",
+                "message": "Deliberation was already marked as failed"
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel deliberation with status: {current_status}"
+            )
+
+    # Mark the response as failed
+    storage.update_response_status(response_id, "failed")
+
+    # Also set error details to indicate manual cancellation
+    try:
+        supabase.table("assistant_responses").update({
+            "error_details": {
+                "error": "Deliberation was manually cancelled",
+                "failed_stage": current_status,
+                "cancelled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            }
+        }).eq("id", response_id).execute()
+    except Exception as e:
+        logger.warning(f"Failed to set error details for cancelled response {response_id}: {e}")
+
+    logger.info(f"[CANCEL] Response {response_id} cancelled by user {user.id} (was {current_status})")
+
+    return {
+        "success": True,
+        "response_id": response_id,
+        "previous_status": current_status,
+        "new_status": "failed",
+        "message": "Deliberation cancelled successfully"
+    }
+
+
+@app.post("/api/responses/{response_id}/resume")
+async def resume_response(
+    response_id: str,
+    user: AuthenticatedUser = Depends(get_current_user)
+):
+    """
+    Resume a failed deliberation from the last completed stage.
+
+    This endpoint checks which stages have already been completed for a failed
+    response and streams the remaining stages. It reuses persisted stage data
+    to avoid duplicate API calls.
+
+    Returns SSE stream with the remaining stages (similar to /message/stream).
+    """
+    supabase = storage.get_supabase_client()
+
+    # Fetch the response to check its current status
+    response_result = (
+        supabase.table("assistant_responses")
+        .select("*")
+        .eq("id", response_id)
+        .execute()
+    )
+
+    if not response_result.data:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    response = response_result.data[0]
+
+    # Verify ownership by checking the conversation belongs to this user
+    user_message_id = response.get("user_message_id")
+    if not user_message_id:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    msg_result = (
+        supabase.table("messages")
+        .select("conversation_id, content")
+        .eq("id", user_message_id)
+        .execute()
+    )
+
+    if not msg_result.data:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    conv_id = msg_result.data[0]["conversation_id"]
+    user_query = msg_result.data[0]["content"]
+
+    if not storage._verify_conversation_ownership(conv_id, user.id):
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Check if the response is in a failed state (only failed responses can be resumed)
+    current_status = response.get("response_status")
+    if current_status != 'failed':
+        if current_status == 'complete':
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot resume a completed deliberation"
+            )
+        elif current_status in ['pending', 'stage1_in_progress', 'stage2_in_progress', 'stage3_in_progress']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot resume - deliberation is still in progress ({current_status})"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot resume deliberation with status: {current_status}"
+            )
+
+    # Determine which stages are already complete
+    stage1_responses = response.get("stage1_responses")
+    stage2_evaluations = response.get("stage2_evaluations")
+    stage3_synthesis = response.get("stage3_synthesis")
+    metadata = response.get("metadata")
+
+    # Determine resume point
+    if stage3_synthesis:
+        # All stages complete - this shouldn't happen for 'failed' status but handle it
+        raise HTTPException(
+            status_code=400,
+            detail="All stages are already complete. Nothing to resume."
+        )
+    elif stage2_evaluations:
+        resume_from = 3
+        logger.info(f"[RESUME] Resuming from Stage 3 for response {response_id}")
+    elif stage1_responses:
+        resume_from = 2
+        logger.info(f"[RESUME] Resuming from Stage 2 for response {response_id}")
+    else:
+        resume_from = 1
+        logger.info(f"[RESUME] Resuming from Stage 1 for response {response_id}")
+
+    # Capture values for the generator closure
+    captured_response_id = response_id
+    captured_conv_id = conv_id
+    user_id = user.id
+
+    async def resume_generator():
+        stage1_duration_ms = 0
+        stage2_duration_ms = 0
+        stage3_duration_ms = 0
+        stage1_results = stage1_responses or []
+        stage2_results = stage2_evaluations or []
+        label_to_model = metadata.get("label_to_model", {}) if metadata else {}
+        aggregate_rankings = metadata.get("aggregate_rankings", []) if metadata else []
+        copilot_models = get_copilot_models()
+
+        try:
+            # Emit resume_start event with info about what's being resumed
+            yield f"data: {json.dumps({'type': 'resume_start', 'resume_from_stage': resume_from, 'response_id': captured_response_id})}\n\n"
+
+            # Mark response as resuming (reset from failed)
+            storage.update_response_status(captured_response_id, f"stage{resume_from}_in_progress")
+
+            # Stage 1: Run only if not already complete
+            if resume_from == 1:
+                yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
+                stage1_start = time.time()
+
+                # Use stage1_collect_responses (non-progress version for simplicity)
+                from .copilot import stage1_collect_responses
+                stage1_results = await stage1_collect_responses(user_query)
+                stage1_duration_ms = int((time.time() - stage1_start) * 1000)
+                logger.info(f"[RESUME] Stage 1 completed in {stage1_duration_ms/1000:.1f}s for response {captured_response_id}")
+
+                if not stage1_results:
+                    error_msg = "All models failed to respond. Please try again later."
+                    storage.set_response_error(captured_response_id, error_msg, "stage1")
+                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'stage': 'stage1', 'response_id': captured_response_id})}\n\n"
+                    return
+
+                storage.update_response_stage1(captured_response_id, stage1_results, stage1_duration_ms)
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
+            else:
+                # Emit stage1_skipped to let frontend know we're reusing existing data
+                yield f"data: {json.dumps({'type': 'stage1_skipped', 'data': stage1_results, 'reused': True})}\n\n"
+
+            # Stage 2: Run only if not already complete
+            if resume_from <= 2:
+                if resume_from == 2:
+                    # Resuming from Stage 2 - need to run it
+                    storage.update_response_status(captured_response_id, "stage2_in_progress")
+                    yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                    stage2_start = time.time()
+                    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+                    aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+                    stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+                    logger.info(f"[RESUME] Stage 2 completed in {stage2_duration_ms/1000:.1f}s for response {captured_response_id}")
+
+                    if not stage2_results:
+                        error_msg = "All ranking models failed to respond. Please try again later."
+                        storage.set_response_error(captured_response_id, error_msg, "stage2")
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'stage': 'stage2', 'stage1_data': stage1_results, 'response_id': captured_response_id})}\n\n"
+                        return
+
+                    resume_metadata = {"label_to_model": label_to_model, "aggregate_rankings": aggregate_rankings}
+                    storage.update_response_stage2(captured_response_id, stage2_results, stage2_duration_ms, resume_metadata)
+                    yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': resume_metadata})}\n\n"
+                elif resume_from == 1:
+                    # We just ran Stage 1, now run Stage 2
+                    storage.update_response_status(captured_response_id, "stage2_in_progress")
+                    yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                    stage2_start = time.time()
+                    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+                    aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+                    stage2_duration_ms = int((time.time() - stage2_start) * 1000)
+                    logger.info(f"[RESUME] Stage 2 completed in {stage2_duration_ms/1000:.1f}s for response {captured_response_id}")
+
+                    if not stage2_results:
+                        error_msg = "All ranking models failed to respond. Please try again later."
+                        storage.set_response_error(captured_response_id, error_msg, "stage2")
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'stage': 'stage2', 'stage1_data': stage1_results, 'response_id': captured_response_id})}\n\n"
+                        return
+
+                    resume_metadata = {"label_to_model": label_to_model, "aggregate_rankings": aggregate_rankings}
+                    storage.update_response_stage2(captured_response_id, stage2_results, stage2_duration_ms, resume_metadata)
+                    yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': resume_metadata})}\n\n"
+            else:
+                # Resuming from Stage 3 - emit stage2_skipped
+                yield f"data: {json.dumps({'type': 'stage2_skipped', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}, 'reused': True})}\n\n"
+
+            # Stage 3: Always run (this is the final step)
+            storage.update_response_status(captured_response_id, "stage3_in_progress")
+            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+            stage3_start = time.time()
+            stage3_result = await stage3_synthesize_final(user_query, stage1_results, stage2_results)
+            stage3_duration_ms = int((time.time() - stage3_start) * 1000)
+            logger.info(f"[RESUME] Stage 3 completed in {stage3_duration_ms/1000:.1f}s for response {captured_response_id}")
+
+            # Save Stage 3 results
+            storage.update_response_stage3(captured_response_id, stage3_result, stage3_duration_ms)
+            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'duration_ms': stage3_duration_ms})}\n\n"
+
+            # Mark response as complete and cleanup
+            storage.update_response_status(captured_response_id, "complete")
+            storage.cleanup_partial_stage_responses(captured_response_id)
+            logger.info(f"[RESUME] Marked response {captured_response_id} as complete")
+
+            # Send completion event
+            total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
+            logger.info(
+                f"[RESUME] Deliberation resumed and completed for response {captured_response_id}: "
+                f"Stage1={stage1_duration_ms/1000:.1f}s, Stage2={stage2_duration_ms/1000:.1f}s, "
+                f"Stage3={stage3_duration_ms/1000:.1f}s, Total={total_duration_ms/1000:.1f}s"
+            )
+            yield f"data: {json.dumps({'type': 'complete', 'total_duration_ms': total_duration_ms, 'resumed': True})}\n\n"
+
+        except asyncio.CancelledError:
+            logger.warning(f"[RESUME] Client disconnected for response {captured_response_id}")
+            try:
+                storage.update_response_status(captured_response_id, "failed")
+                supabase.table("assistant_responses").update({
+                    "error_details": {
+                        "error": "Client disconnected during resume",
+                        "failed_stage": "unknown",
+                        "disconnected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    }
+                }).eq("id", captured_response_id).execute()
+            except Exception as cleanup_error:
+                logger.warning(f"[RESUME] Failed to mark response as failed after disconnect: {cleanup_error}")
+            raise
+
+        except Exception as e:
+            logger.exception(f"[RESUME] Error resuming response {captured_response_id}")
+            try:
+                storage.set_response_error(captured_response_id, str(e), "unknown")
+            except Exception as cleanup_error:
+                logger.warning(f"[RESUME] Failed to mark response as failed: {cleanup_error}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'response_id': captured_response_id})}\n\n"
+
+    return StreamingResponse(
+        resume_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        }
+    )
 
 
 @app.post("/api/conversations/{conversation_id}/message")
@@ -343,10 +756,30 @@ async def send_message_stream(
         stage3_duration_ms = 0
 
         async def on_model_complete(model: str, response_content, success: bool, elapsed_ms: int):
-            """Callback when a model completes - adds event to queue."""
+            """Callback when a model completes - adds event to queue AND persists to DB."""
+            nonlocal response_id  # Will be set by the time Stage 1 starts
             elapsed_sec = elapsed_ms / 1000
             status = "succeeded" if success else "failed"
             logger.info(f"[STREAM] Model {model} {status} in {elapsed_sec:.1f}s for conversation {captured_conversation_id}")
+
+            # Persist individual model response immediately (incremental persistence)
+            # This enables smart retry at the model level if Stage 1 fails mid-way
+            if response_id is not None:
+                try:
+                    storage.save_model_response(
+                        assistant_response_id=response_id,
+                        stage=1,
+                        model_name=model,
+                        response_content={"content": response_content} if response_content else None,
+                        elapsed_ms=elapsed_ms,
+                        success=success,
+                        error_message=None if success else "Model failed to respond",
+                    )
+                    logger.debug(f"[STREAM] Persisted model response for {model} to DB")
+                except Exception as e:
+                    # Log but don't fail - the event still goes to frontend
+                    logger.warning(f"[STREAM] Failed to persist model response for {model}: {e}")
+
             event = {
                 'type': 'model_response',
                 'model': model,
@@ -447,6 +880,10 @@ async def send_message_stream(
             else:
                 # Normal flow: collect responses from all models
                 logger.info(f"[STREAM] Starting Stage 1 with {len(copilot_models)} models for conversation {captured_conversation_id}")
+
+                # Update response status to stage1_in_progress (incremental persistence)
+                storage.update_response_status(response_id, "stage1_in_progress")
+
                 yield f"data: {json.dumps({'type': 'stage1_start', 'models': copilot_models})}\n\n"
 
                 stage1_start = time.time()
@@ -486,6 +923,8 @@ async def send_message_stream(
                 storage.update_response_stage1(
                     response_id, stage1_results, stage1_duration_ms
                 )
+                # Update response status to stage1_complete
+                storage.update_response_status(response_id, "stage1_complete")
                 logger.info(f"[STREAM] Saved stage1 results for response {response_id} (user message {user_message_id})")
 
                 yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results, 'duration_ms': stage1_duration_ms})}\n\n"
@@ -506,11 +945,11 @@ async def send_message_stream(
                     except Exception:
                         pass
 
-                # Clean up the incomplete response placeholder
+                # Mark response as failed with error details (preserves partial data for smart retry)
                 if response_id is not None:
-                    storage.delete_response_placeholder(response_id)
-                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
-                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage1'})}\n\n"
+                    storage.set_response_error(response_id, error_msg, "stage1")
+                    logger.info(f"[STREAM] Marked response {response_id} as failed (stage1)")
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage1', 'response_id': response_id})}\n\n"
                 return
 
             # Stage 2: Collect rankings (or reuse from retry)
@@ -532,6 +971,9 @@ async def send_message_stream(
                 yield f"data: {json.dumps({'type': 'stage2_skipped', 'data': stage2_results, 'metadata': metadata, 'reused': True})}\n\n"
             else:
                 # Normal flow: collect rankings from all models
+                # Update response status to stage2_in_progress (incremental persistence)
+                storage.update_response_status(response_id, "stage2_in_progress")
+
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
                 stage2_start = time.time()
                 stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
@@ -554,6 +996,8 @@ async def send_message_stream(
                 storage.update_response_stage2(
                     response_id, stage2_results, stage2_duration_ms, metadata
                 )
+                # Update response status to stage2_complete
+                storage.update_response_status(response_id, "stage2_complete")
                 logger.info(f"[STREAM] Saved stage2 results for response {response_id} (user message {user_message_id})")
 
                 yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'duration_ms': stage2_duration_ms, 'metadata': metadata})}\n\n"
@@ -574,14 +1018,17 @@ async def send_message_stream(
                     except Exception:
                         pass
 
-                # Clean up the incomplete response placeholder
+                # Mark response as failed with error details (preserves partial data for smart retry)
                 if response_id is not None:
-                    storage.delete_response_placeholder(response_id)
-                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
-                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage2', 'stage1_data': stage1_results})}\n\n"
+                    storage.set_response_error(response_id, error_msg, "stage2")
+                    logger.info(f"[STREAM] Marked response {response_id} as failed (stage2)")
+                yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'conversation_id': captured_conversation_id, 'stage': 'stage2', 'stage1_data': stage1_results, 'response_id': response_id})}\n\n"
                 return
 
             # Stage 3: Synthesize final answer (always run - this is where we left off on retry)
+            # Update response status to stage3_in_progress (incremental persistence)
+            storage.update_response_status(response_id, "stage3_in_progress")
+
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_start = time.time()
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
@@ -615,6 +1062,11 @@ async def send_message_stream(
                 except Exception as e:
                     logger.error(f"[STREAM] Title generation error: {e}")
 
+            # Mark response as complete and cleanup partial stage responses
+            storage.update_response_status(response_id, "complete")
+            storage.cleanup_partial_stage_responses(response_id)
+            logger.info(f"[STREAM] Marked response {response_id} as complete and cleaned up partial stage data")
+
             # Send completion event with total timing
             total_duration_ms = stage1_duration_ms + stage2_duration_ms + stage3_duration_ms
             total_duration_sec = total_duration_ms / 1000
@@ -624,6 +1076,44 @@ async def send_message_stream(
                 f"Stage3={stage3_duration_ms/1000:.1f}s, Total={total_duration_sec:.1f}s"
             )
             yield f"data: {json.dumps({'type': 'complete', 'total_duration_ms': total_duration_ms})}\n\n"
+
+        except asyncio.CancelledError:
+            # Client disconnected mid-stream (e.g., browser refresh, tab close)
+            # Mark the response as failed so the user can retry when they return
+            logger.warning(
+                f"[STREAM] Client disconnected for conversation {captured_conversation_id}, "
+                f"response_id={response_id}"
+            )
+
+            # Cancel title_task if it exists and is still running
+            if title_task is not None and not title_task.done():
+                title_task.cancel()
+                try:
+                    await title_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
+            # Mark response as failed due to client disconnection
+            if response_id is not None:
+                try:
+                    storage.update_response_status(response_id, "failed")
+                    # Also set error details to indicate client disconnection
+                    supabase = storage.get_supabase_client()
+                    supabase.table("assistant_responses").update({
+                        "error_details": {
+                            "error": "Client disconnected during deliberation",
+                            "failed_stage": "unknown",
+                            "disconnected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        }
+                    }).eq("id", response_id).execute()
+                    logger.info(f"[STREAM] Marked response {response_id} as failed (client disconnected)")
+                except Exception as cleanup_error:
+                    logger.warning(f"[STREAM] Failed to mark response as failed after disconnect: {cleanup_error}")
+
+            # Re-raise to properly close the generator
+            raise
 
         except Exception as e:
             # Cancel title_task if it exists and is still running
@@ -636,18 +1126,17 @@ async def send_message_stream(
                 except Exception:
                     pass
 
-            # Clean up incomplete assistant response placeholder to prevent
-            # "Chairman: Unknown" from showing in the UI
+            # Mark response as failed with error details (preserves partial data for smart retry)
             if response_id is not None:
-                deleted = storage.delete_response_placeholder(response_id)
-                if deleted:
-                    logger.info(f"[STREAM] Deleted incomplete response placeholder {response_id}")
-                else:
-                    logger.warning(f"[STREAM] Failed to delete response placeholder {response_id}")
+                try:
+                    storage.set_response_error(response_id, str(e), "unknown")
+                    logger.info(f"[STREAM] Marked response {response_id} as failed (exception)")
+                except Exception as cleanup_error:
+                    logger.warning(f"[STREAM] Failed to mark response as failed: {cleanup_error}")
 
-            # Send error event with conversation_id for frontend cleanup
+            # Send error event with conversation_id and response_id for frontend smart retry
             logger.exception("Error in streaming endpoint")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'conversation_id': captured_conversation_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'conversation_id': captured_conversation_id, 'response_id': response_id})}\n\n"
 
     return StreamingResponse(
         event_generator(),

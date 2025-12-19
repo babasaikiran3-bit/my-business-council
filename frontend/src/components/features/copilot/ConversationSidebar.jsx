@@ -1,3 +1,4 @@
+import { useRef, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { PlusCircle, MessageSquare, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -67,8 +68,32 @@ function ConversationSkeleton() {
 }
 
 /**
+ * Loading indicator shown at the bottom of the list while loading more.
+ */
+function LoadMoreIndicator() {
+  return (
+    <div className="flex items-center justify-center py-3 text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+      <span className="text-xs">Loading more...</span>
+    </div>
+  )
+}
+
+/**
+ * End of list indicator shown when all conversations have been loaded.
+ */
+function EndOfListIndicator() {
+  return (
+    <div className="py-2 text-center text-muted-foreground/50 text-xs">
+      — End of conversations —
+    </div>
+  )
+}
+
+/**
  * ConversationSidebar - Secondary sidebar for managing Copilot conversations.
  * Displays within the main content area of the dashboard.
+ * Supports infinite scroll pagination.
  */
 export default function ConversationSidebar({
   conversations,
@@ -77,7 +102,39 @@ export default function ConversationSidebar({
   onNewConversation,
   processingConversations = new Map(),
   isLoadingConversations = false,
+  isLoadingMore = false,
+  hasMore = true,
+  onLoadMore,
 }) {
+  const scrollContainerRef = useRef(null)
+  const loadMoreTriggerRef = useRef(null)
+
+  // Set up IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const triggerElement = loadMoreTriggerRef.current
+    const scrollContainer = scrollContainerRef.current
+
+    if (!triggerElement || !scrollContainer || !onLoadMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries
+        // Load more when the trigger element is visible and we have more to load
+        if (entry.isIntersecting && hasMore && !isLoadingMore && !isLoadingConversations) {
+          onLoadMore()
+        }
+      },
+      {
+        root: scrollContainer,
+        rootMargin: '100px', // Trigger 100px before reaching the bottom
+        threshold: 0.1,
+      }
+    )
+
+    observer.observe(triggerElement)
+    return () => observer.disconnect()
+  }, [hasMore, isLoadingMore, isLoadingConversations, onLoadMore])
+
   return (
     <div className="w-64 border-r bg-muted/30 flex flex-col h-full shrink-0">
       {/* Header */}
@@ -89,8 +146,8 @@ export default function ConversationSidebar({
         </Button>
       </div>
 
-      {/* Conversation list - native scrolling for reliability */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+      {/* Conversation list - native scrolling with infinite scroll */}
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto p-2">
           {isLoadingConversations ? (
             <ConversationSkeleton />
           ) : conversations.length === 0 ? (
@@ -98,54 +155,62 @@ export default function ConversationSidebar({
               No conversations yet
             </div>
           ) : (
-            <div className="space-y-1">
-              {conversations.map((conv) => {
-                const timestamp = formatTimestamp(conv.created_at)
-                const isProcessing = processingConversations.has(conv.id)
-                return (
-                  <button
-                    type="button"
-                    key={conv.id}
-                    className={cn(
-                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                      "hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      conv.id === currentConversationId
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground"
-                    )}
-                    onClick={() => onSelectConversation(conv.id)}
-                  >
-                    <div className="flex items-start gap-2">
-                      {isProcessing ? (
-                        <Loader2 className="h-4 w-4 mt-0.5 shrink-0 animate-spin text-primary" />
-                      ) : (
-                        <MessageSquare className="h-4 w-4 mt-0.5 shrink-0" />
+            <>
+              <div className="space-y-1">
+                {conversations.map((conv) => {
+                  const timestamp = formatTimestamp(conv.created_at)
+                  const isProcessing = processingConversations.has(conv.id)
+                  return (
+                    <button
+                      type="button"
+                      key={conv.id}
+                      className={cn(
+                        "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                        "hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        conv.id === currentConversationId
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground"
                       )}
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate text-xs">
-                          {conv.title || 'New Conversation'}
-                        </div>
-                        <div className="text-xs text-muted-foreground/70 mt-0.5 flex items-center gap-1">
-                          {isProcessing ? (
-                            <span className="text-primary">Processing...</span>
-                          ) : (
-                            <>
-                              <span>{conv.message_count} msgs</span>
-                              {timestamp && (
-                                <>
-                                  <span className="text-muted-foreground/40">•</span>
-                                  <span>{timestamp}</span>
-                                </>
-                              )}
-                            </>
-                          )}
+                      onClick={() => onSelectConversation(conv.id)}
+                    >
+                      <div className="flex items-start gap-2">
+                        {isProcessing ? (
+                          <Loader2 className="h-4 w-4 mt-0.5 shrink-0 animate-spin text-primary" />
+                        ) : (
+                          <MessageSquare className="h-4 w-4 mt-0.5 shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate text-xs">
+                            {conv.title || 'New Conversation'}
+                          </div>
+                          <div className="text-xs text-muted-foreground/70 mt-0.5 flex items-center gap-1">
+                            {isProcessing ? (
+                              <span className="text-primary">Processing...</span>
+                            ) : (
+                              <>
+                                <span>{conv.message_count} msgs</span>
+                                {timestamp && (
+                                  <>
+                                    <span className="text-muted-foreground/40">•</span>
+                                    <span>{timestamp}</span>
+                                  </>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Infinite scroll trigger and status indicators */}
+              <div ref={loadMoreTriggerRef} className="mt-2">
+                {isLoadingMore && <LoadMoreIndicator />}
+                {!hasMore && conversations.length > 0 && <EndOfListIndicator />}
+              </div>
+            </>
           )}
       </div>
     </div>

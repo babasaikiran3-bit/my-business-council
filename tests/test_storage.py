@@ -67,13 +67,16 @@ class TestGetConversation:
 
 
 class TestListConversations:
-    """Tests for list_conversations function."""
+    """Tests for list_conversations function with pagination."""
 
     def test_list_conversations_empty(self, test_user_id):
         """Test listing conversations for user with no conversations."""
-        conversations = storage.list_conversations(user_id=test_user_id)
-        # Should return empty list (or list without our test user's conversations)
-        assert isinstance(conversations, list)
+        result = storage.list_conversations(user_id=test_user_id)
+        # Should return paginated response with empty conversations list
+        assert isinstance(result, dict)
+        assert "conversations" in result
+        assert "has_more" in result
+        assert isinstance(result["conversations"], list)
 
     def test_list_conversations_with_data(self, test_user_id):
         """Test listing conversations after creating some."""
@@ -84,12 +87,37 @@ class TestListConversations:
         storage.create_conversation(conv_id1, user_id=test_user_id)
         storage.create_conversation(conv_id2, user_id=test_user_id)
 
-        conversations = storage.list_conversations(user_id=test_user_id)
+        result = storage.list_conversations(user_id=test_user_id)
 
-        assert len(conversations) >= 2
-        conv_ids = [c["id"] for c in conversations]
+        assert len(result["conversations"]) >= 2
+        conv_ids = [c["id"] for c in result["conversations"]]
         assert conv_id1 in conv_ids
         assert conv_id2 in conv_ids
+
+    def test_list_conversations_pagination(self, test_user_id):
+        """Test pagination of conversations."""
+        import uuid
+        # Create 5 conversations
+        conv_ids = []
+        for _ in range(5):
+            conv_id = str(uuid.uuid4())
+            conv_ids.append(conv_id)
+            storage.create_conversation(conv_id, user_id=test_user_id)
+
+        # Get first page (limit 2)
+        result1 = storage.list_conversations(user_id=test_user_id, limit=2, offset=0)
+        assert len(result1["conversations"]) == 2
+        assert result1["has_more"] is True
+
+        # Get second page (limit 2, offset 2)
+        result2 = storage.list_conversations(user_id=test_user_id, limit=2, offset=2)
+        assert len(result2["conversations"]) == 2
+        assert result2["has_more"] is True
+
+        # Get third page (limit 2, offset 4)
+        result3 = storage.list_conversations(user_id=test_user_id, limit=2, offset=4)
+        assert len(result3["conversations"]) >= 1
+        # has_more depends on whether there are other conversations from previous tests
 
 
 class TestAddUserMessage:
@@ -407,4 +435,196 @@ class TestMultiTurnConversation:
         assert conversation["messages"][2]["role"] == "user"
         assert conversation["messages"][2]["content"] == "Follow-up question"
         assert conversation["messages"][3]["role"] == "assistant"
+
+
+class TestIncrementalPersistence:
+    """Tests for incremental persistence of model responses."""
+
+    def test_save_model_response(self, test_user_id, test_conversation_id):
+        """Test saving individual model responses during Stage 1."""
+        # Setup: create conversation, message, and response placeholder
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Save a model response
+        storage.save_model_response(
+            assistant_response_id=response_id,
+            stage=1,
+            model_name="openai/gpt-4",
+            response_content={"content": "Test response from GPT-4"},
+            elapsed_ms=1500,
+            success=True,
+        )
+
+        # Verify it was saved
+        partial = storage.get_partial_stage_responses(response_id, stage=1)
+        assert len(partial) == 1
+        assert partial[0]["model_name"] == "openai/gpt-4"
+        assert partial[0]["response_content"]["content"] == "Test response from GPT-4"
+        assert partial[0]["elapsed_ms"] == 1500
+
+    def test_save_multiple_model_responses(self, test_user_id, test_conversation_id):
+        """Test saving multiple model responses for smart retry."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Save multiple model responses
+        models = [
+            ("openai/gpt-4", "Response from GPT-4", True),
+            ("anthropic/claude-3", "Response from Claude", True),
+            ("google/gemini-pro", None, False),  # Failed model
+        ]
+        for model, content, success in models:
+            storage.save_model_response(
+                assistant_response_id=response_id,
+                stage=1,
+                model_name=model,
+                response_content={"content": content} if content else None,
+                elapsed_ms=1000,
+                success=success,
+                error_message=None if success else "Model failed",
+            )
+
+        # Verify only successful responses are returned
+        partial = storage.get_partial_stage_responses(response_id, stage=1)
+        assert len(partial) == 2
+        model_names = [p["model_name"] for p in partial]
+        assert "openai/gpt-4" in model_names
+        assert "anthropic/claude-3" in model_names
+        assert "google/gemini-pro" not in model_names
+
+    def test_update_response_status(self, test_user_id, test_conversation_id):
+        """Test updating response status through stages."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Update status through stages
+        storage.update_response_status(response_id, "stage1_in_progress")
+        result = storage.get_response_with_partial_stages(response_id)
+        assert result["response"]["response_status"] == "stage1_in_progress"
+
+        storage.update_response_status(response_id, "stage1_complete")
+        result = storage.get_response_with_partial_stages(response_id)
+        assert result["response"]["response_status"] == "stage1_complete"
+
+    def test_set_response_error(self, test_user_id, test_conversation_id):
+        """Test marking a response as failed with error details."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Mark as failed
+        storage.set_response_error(response_id, "All models failed", "stage1")
+
+        # Verify error details
+        result = storage.get_response_with_partial_stages(response_id)
+        assert result["response"]["response_status"] == "failed"
+        assert result["response"]["error_details"]["message"] == "All models failed"
+        assert result["response"]["error_details"]["stage"] == "stage1"
+
+    def test_get_response_with_partial_stages(self, test_user_id, test_conversation_id):
+        """Test retrieving response with all partial stage data."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Save some model responses
+        storage.save_model_response(
+            assistant_response_id=response_id,
+            stage=1,
+            model_name="openai/gpt-4",
+            response_content={"content": "Test response"},
+            elapsed_ms=1500,
+            success=True,
+        )
+
+        # Get full response with partial stages
+        result = storage.get_response_with_partial_stages(response_id)
+        assert result is not None
+        assert "response" in result
+        assert "partial_stages" in result
+        assert 1 in result["partial_stages"]
+        assert len(result["partial_stages"][1]) == 1
+
+    def test_cleanup_partial_stage_responses(self, test_user_id, test_conversation_id):
+        """Test that partial responses are cleaned up after completion."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Save model responses
+        storage.save_model_response(
+            assistant_response_id=response_id,
+            stage=1,
+            model_name="openai/gpt-4",
+            response_content={"content": "Test response"},
+            elapsed_ms=1500,
+            success=True,
+        )
+
+        # Verify they exist
+        partial = storage.get_partial_stage_responses(response_id, stage=1)
+        assert len(partial) == 1
+
+        # Clean up
+        storage.cleanup_partial_stage_responses(response_id)
+
+        # Verify they're gone
+        partial = storage.get_partial_stage_responses(response_id, stage=1)
+        assert len(partial) == 0
+
+    def test_model_response_upsert(self, test_user_id, test_conversation_id):
+        """Test that saving the same model response twice updates instead of duplicating."""
+        # Setup
+        storage.create_conversation(test_conversation_id, user_id=test_user_id)
+        user_msg_id = storage.add_user_message(
+            test_conversation_id, user_id=test_user_id, content="Test question"
+        )
+        response_id = storage.create_response_placeholder(user_msg_id)
+
+        # Save initial response
+        storage.save_model_response(
+            assistant_response_id=response_id,
+            stage=1,
+            model_name="openai/gpt-4",
+            response_content={"content": "First response"},
+            elapsed_ms=1000,
+            success=True,
+        )
+
+        # Save again (simulating retry)
+        storage.save_model_response(
+            assistant_response_id=response_id,
+            stage=1,
+            model_name="openai/gpt-4",
+            response_content={"content": "Updated response"},
+            elapsed_ms=1500,
+            success=True,
+        )
+
+        # Verify only one record exists with updated content
+        partial = storage.get_partial_stage_responses(response_id, stage=1)
+        assert len(partial) == 1
+        assert partial[0]["response_content"]["content"] == "Updated response"
+        assert partial[0]["elapsed_ms"] == 1500
 

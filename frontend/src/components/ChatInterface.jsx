@@ -6,12 +6,35 @@ import { isConnectionError } from '@/contexts/ConnectionErrorContext';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
-import { Stage1Progress, StageProgress } from './ProgressIndicator';
+import { Stage1Progress, StageProgress, RecoveryProgress } from './ProgressIndicator';
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
-import { Sparkles, Send, Undo2, Loader2, User, Users, AlertCircle, RefreshCw, StopCircle } from "lucide-react"
+import { Sparkles, Send, Undo2, Loader2, User, Users, AlertCircle, RefreshCw, StopCircle, PlayCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+/**
+ * Determine the resume stage label based on available stage data.
+ * Returns null if no resume is possible (no partial data).
+ */
+function getResumeStageInfo(msg) {
+  if (msg.response_status !== 'failed') return null;
+
+  const hasStage1 = msg.stage1 && msg.stage1.length > 0;
+  const hasStage2 = msg.stage2 && msg.stage2.length > 0;
+  const hasStage3 = msg.stage3 && Object.keys(msg.stage3).length > 0;
+
+  // If all stages complete, nothing to resume
+  if (hasStage3) return null;
+
+  if (hasStage2) {
+    return { stage: 3, label: 'Resume from Stage 3' };
+  } else if (hasStage1) {
+    return { stage: 2, label: 'Resume from Stage 2' };
+  } else {
+    return { stage: 1, label: 'Restart Deliberation' };
+  }
+}
 
 export default function ChatInterface({
   conversation,
@@ -25,6 +48,15 @@ export default function ChatInterface({
   onRetry,
   onClearError,
   onCancelStream,
+  // Polling state for recovery after browser refresh
+  pollingStatus = null,
+  pollingResponseId = null,
+  onStopPolling = null,
+  onCancelDeliberation = null,
+  isCancellingDeliberation = false,
+  // Resume functionality for failed persisted responses
+  onResumeDeliberation = null,
+  resumingResponseId = null,
 }) {
   const [input, setInput] = useState('');
   const [isImproving, setIsImproving] = useState(false);
@@ -512,6 +544,69 @@ export default function ChatInterface({
                         />
                       )}
                     </div>
+
+                    {/* Recovery indicator when polling for in-progress deliberation after browser refresh */}
+                    {pollingStatus && !msg.loading && index === conversation.messages.length - 1 && (
+                      <RecoveryProgress
+                        status={pollingStatus}
+                        onStopPolling={onStopPolling}
+                        onCancel={pollingResponseId && onCancelDeliberation ? () => onCancelDeliberation(pollingResponseId) : null}
+                        isCancelling={isCancellingDeliberation}
+                      />
+                    )}
+
+                    {/* Resume button for failed deliberations with partial stage data */}
+                    {(() => {
+                      const resumeInfo = getResumeStageInfo(msg);
+                      const isResuming = resumingResponseId === msg.response_id;
+                      const isLastMessage = index === conversation.messages.length - 1;
+
+                      // Only show for last assistant message with failed status and resumable state
+                      if (!resumeInfo || !isLastMessage || !msg.response_id || !onResumeDeliberation) return null;
+                      // Don't show if currently polling (still checking status)
+                      if (pollingStatus) return null;
+                      // Hide the card once resume has started (isResuming true means SSE stream is active)
+                      // The progress indicators will show stage progress instead
+                      if (isResuming) return null;
+
+                      return (
+                        <Card className="border-amber-500/50 bg-amber-50/30">
+                          <CardContent className="pt-4">
+                            <div className="flex items-start gap-3">
+                              <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1 space-y-3">
+                                <div>
+                                  <p className="font-medium text-amber-700">Deliberation Incomplete</p>
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    This deliberation didn't complete.{' '}
+                                    {resumeInfo.stage > 1 && `Stage ${resumeInfo.stage - 1} data is available and can be reused.`}
+                                  </p>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => onResumeDeliberation(msg.response_id)}
+                                  disabled={isResuming}
+                                  className="gap-2 border-amber-500/50 hover:bg-amber-100/50"
+                                >
+                                  {isResuming ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      Resuming...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <PlayCircle className="h-4 w-4" />
+                                      {resumeInfo.label}
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

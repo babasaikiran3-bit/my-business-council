@@ -40,6 +40,46 @@ const STREAM_TIMEOUT_MS = 480000 // 8 minutes
 // Maximum number of simultaneous streams to prevent resource exhaustion
 const MAX_SIMULTANEOUS_STREAMS = 5
 
+// Valid in-progress status values (deliberation not yet complete or failed)
+const IN_PROGRESS_STATUSES = [
+  'pending',
+  'stage1_in_progress',
+  'stage1_complete',
+  'stage2_in_progress',
+  'stage2_complete',
+  'stage3_in_progress',
+]
+
+/**
+ * Check if a response_status indicates the deliberation is still in progress.
+ * Defined outside component to ensure stable reference for useCallback dependencies.
+ * @param {string} status - The response_status from the database
+ * @returns {boolean} True if the deliberation is still being processed
+ */
+const isInProgressStatus = (status) => IN_PROGRESS_STATUSES.includes(status)
+
+/**
+ * Get the current stage name from a response_status for display.
+ * Defined outside component to ensure stable reference.
+ * @param {string} status - The response_status from the database
+ * @returns {string} Human-readable stage description
+ */
+const getStageFromStatus = (status) => {
+  switch (status) {
+    case 'pending':
+    case 'stage1_in_progress':
+      return 'Stage 1: Collecting responses'
+    case 'stage1_complete':
+    case 'stage2_in_progress':
+      return 'Stage 2: Peer rankings'
+    case 'stage2_complete':
+    case 'stage3_in_progress':
+      return 'Stage 3: Synthesizing'
+    default:
+      return 'Processing'
+  }
+}
+
 /**
  * Creates a fresh stream state object for a conversation.
  * @param {Object} conversation - The conversation object to associate with this stream
@@ -66,12 +106,18 @@ const STALE_CHECK_INTERVAL_MS = 30000
 // This should match STREAM_TIMEOUT_MS to ensure consistent timeout behavior.
 const STALE_THRESHOLD_MS = 480000
 
+// Pagination constants
+const CONVERSATIONS_PAGE_SIZE = 10
+
 export default function CopilotFeature({ initialConversationId }) {
   // ============================================================================
-  // CONVERSATION LIST STATE
+  // CONVERSATION LIST STATE (with pagination)
   // ============================================================================
   const [conversations, setConversations] = useState([])
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [hasMoreConversations, setHasMoreConversations] = useState(true)
+  const [conversationsOffset, setConversationsOffset] = useState(0)
 
   // ============================================================================
   // CURRENT CONVERSATION STATE (what's visible in the UI)
@@ -86,6 +132,21 @@ export default function CopilotFeature({ initialConversationId }) {
   })
   // Track when we're creating a conversation on first message send
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
+
+  // ============================================================================
+  // POLLING STATE FOR RECOVERY (when page refreshed during deliberation)
+  // ============================================================================
+  // Track conversations being polled for in-progress deliberations
+  // Structure: { [conversationId]: { status: 'stage2_in_progress', responseId: '...' } }
+  const [pollingConversations, setPollingConversations] = useState({})
+
+  // Track which conversations have a cancel request in progress
+  // Structure: { [conversationId]: true }
+  const [cancellingConversations, setCancellingConversations] = useState({})
+
+  // Track which response is being resumed
+  // Structure: { responseId: true }
+  const [resumingResponses, setResumingResponses] = useState({})
 
   // ============================================================================
   // PER-CONVERSATION STREAM TRACKING (supports multiple simultaneous streams)
@@ -195,16 +256,27 @@ export default function CopilotFeature({ initialConversationId }) {
 
   /**
    * Mark a stage as completed for a specific conversation.
+   * Calculates and stores the final elapsed time to stop the timer display.
    * @param {string} conversationId - The conversation ID
    * @param {string} stageName - 'stage1', 'stage2', or 'stage3'
    */
   const markStageCompleted = useCallback((conversationId, stageName) => {
-    updateStreamState(conversationId, prev => ({
-      stageTimings: {
-        ...prev.stageTimings,
-        [stageName]: { ...prev.stageTimings[stageName], completed: true }
+    updateStreamState(conversationId, prev => {
+      const stageTiming = prev.stageTimings[stageName]
+      const finalElapsed = stageTiming.startTime
+        ? Date.now() - stageTiming.startTime
+        : 0
+      return {
+        stageTimings: {
+          ...prev.stageTimings,
+          [stageName]: {
+            ...stageTiming,
+            completed: true,
+            elapsed: finalElapsed  // Store final elapsed time to stop the timer
+          }
+        }
       }
-    }))
+    })
   }, [updateStreamState])
 
   /**
@@ -382,8 +454,10 @@ export default function CopilotFeature({ initialConversationId }) {
   const loadConversations = async () => {
     setIsLoadingConversations(true)
     try {
-      const convs = await api.listConversations()
-      setConversations(convs)
+      const result = await api.listConversations({ limit: CONVERSATIONS_PAGE_SIZE, offset: 0 })
+      setConversations(result.conversations)
+      setHasMoreConversations(result.has_more)
+      setConversationsOffset(result.conversations.length)
     } catch (error) {
       console.error('Failed to load conversations:', error)
       // Skip toast for connection errors - the ConnectionErrorBanner handles those
@@ -395,10 +469,536 @@ export default function CopilotFeature({ initialConversationId }) {
     }
   }
 
+  const loadMoreConversations = async () => {
+    if (isLoadingMore || !hasMoreConversations) return
+
+    setIsLoadingMore(true)
+    try {
+      const result = await api.listConversations({
+        limit: CONVERSATIONS_PAGE_SIZE,
+        offset: conversationsOffset
+      })
+      setConversations(prev => [...prev, ...result.conversations])
+      setHasMoreConversations(result.has_more)
+      setConversationsOffset(prev => prev + result.conversations.length)
+    } catch (error) {
+      console.error('Failed to load more conversations:', error)
+      // Skip toast for connection errors - the ConnectionErrorBanner handles those
+      if (!isConnectionError(error)) {
+        toast.error('Failed to load more conversations')
+      }
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }
+
+  // Ref to track active polling intervals (conversationId -> intervalId)
+  const pollingIntervalsRef = useRef(new Map())
+
+  /**
+   * Stop polling for a specific conversation.
+   */
+  const stopPolling = useCallback((conversationId) => {
+    const intervalId = pollingIntervalsRef.current.get(conversationId)
+    if (intervalId) {
+      clearInterval(intervalId)
+      pollingIntervalsRef.current.delete(conversationId)
+      console.log(`[Polling] Stopped polling for conversation ${conversationId}`)
+    }
+    // Remove from polling state
+    setPollingConversations(prev => {
+      const { [conversationId]: removed, ...rest } = prev
+      return rest
+    })
+  }, [])
+
+  /**
+   * Cancel a stale/orphaned deliberation.
+   * This marks the response as 'failed' in the database so the user can retry.
+   * @param {string} conversationId - The conversation ID
+   * @param {string} responseId - The response ID to cancel
+   */
+  const handleCancelDeliberation = useCallback(async (conversationId, responseId) => {
+    if (!responseId) {
+      console.error('[Cancel] No responseId provided')
+      toast.error('Cannot cancel: missing response ID')
+      return
+    }
+
+    console.log(`[Cancel] Cancelling deliberation for conversation ${conversationId}, responseId=${responseId}`)
+
+    // Mark as cancelling for UI feedback
+    setCancellingConversations(prev => ({ ...prev, [conversationId]: true }))
+
+    try {
+      const result = await api.cancelResponse(responseId)
+      console.log(`[Cancel] Successfully cancelled: ${result.message}`)
+
+      // Stop polling since the deliberation is now marked as failed
+      stopPolling(conversationId)
+
+      // Reload the conversation to get the updated state
+      const conv = await api.getConversation(conversationId)
+      setCurrentConversation(conv)
+
+      toast.success('Deliberation cancelled', {
+        description: 'You can now retry by sending a new message.',
+      })
+    } catch (error) {
+      console.error('[Cancel] Failed to cancel deliberation:', error)
+      if (!isConnectionError(error)) {
+        toast.error('Failed to cancel deliberation', {
+          description: error.message || 'Please try again.',
+        })
+      }
+    } finally {
+      // Clear cancelling state
+      setCancellingConversations(prev => {
+        const { [conversationId]: removed, ...rest } = prev
+        return rest
+      })
+    }
+  }, [stopPolling])
+
+  /**
+   * Resume a failed deliberation from the last completed stage.
+   * Uses the backend resume endpoint which reuses persisted stage data.
+   * @param {string} responseId - The response ID to resume
+   */
+  const handleResumeDeliberation = useCallback(async (responseId) => {
+    if (!responseId) {
+      console.error('[Resume] No responseId provided')
+      toast.error('Cannot resume: missing response ID')
+      return
+    }
+
+    // Get current conversation ID for stream state management
+    const conversationId = currentConversationId
+    if (!conversationId) {
+      console.error('[Resume] No current conversation')
+      toast.error('Cannot resume: no conversation selected')
+      return
+    }
+
+    console.log(`[Resume] Resuming deliberation for responseId=${responseId}, conversationId=${conversationId}`)
+
+    // Mark as resuming for UI feedback
+    setResumingResponses(prev => ({ ...prev, [responseId]: true }))
+
+    // Initialize stream state for the resume (enables timers)
+    // IMPORTANT: Include lastEventTime to prevent stale stream detector from immediately marking as stalled
+    setConversationStreams(prev => ({
+      ...prev,
+      [conversationId]: {
+        isLoading: true,
+        stageTimings: { ...DEFAULT_STAGE_TIMINGS },
+        modelStatuses: {},
+        modelTimings: {},
+        partialStage1Responses: [],
+        error: null,
+        conversation: currentConversation,
+        lastEventTime: Date.now(),  // Critical: prevents false "stalled" errors
+      }
+    }))
+
+    try {
+      // Create an AbortController for this stream
+      const controller = new AbortController()
+
+      // Update the last assistant message to show loading state
+      setCurrentConversation(prev => {
+        if (!prev?.messages?.length) return prev
+        const messages = [...prev.messages]
+        const lastMsg = messages[messages.length - 1]
+        if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+          messages[messages.length - 1] = {
+            ...lastMsg,
+            response_status: 'resuming',
+            loading: { stage1: false, stage2: false, stage3: false },
+          }
+        }
+        return { ...prev, messages }
+      })
+
+      // Stream the resume response
+      await api.resumeDeliberation(responseId, (eventType, event) => {
+        console.log(`[Resume] Event: ${eventType}`, event)
+
+        // Update lastEventTime for stale stream detection (prevents false "stalled" errors)
+        updateStreamState(conversationId, { lastEventTime: Date.now() })
+
+        // Handle resume-specific events
+        if (eventType === 'resume_start') {
+          toast.info(`Resuming from Stage ${event.resume_from_stage}`, {
+            description: 'Reusing previously completed stage data...',
+            duration: 3000,
+          })
+        }
+
+        // Handle stage skip events (reused data) - mark as already completed
+        if (eventType === 'stage1_skipped') {
+          updateStreamState(conversationId, prev => ({
+            stageTimings: {
+              ...prev.stageTimings,
+              stage1: { startTime: null, elapsed: 0, completed: true },
+            },
+          }))
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage1: event.data,
+                loading: { ...lastMsg.loading, stage1: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        if (eventType === 'stage2_skipped') {
+          updateStreamState(conversationId, prev => ({
+            stageTimings: {
+              ...prev.stageTimings,
+              stage2: { startTime: null, elapsed: 0, completed: true },
+            },
+          }))
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage2: event.data,
+                metadata: event.metadata,
+                loading: { ...lastMsg.loading, stage2: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        // Handle stage start events - update stageTimings to start timer
+        if (eventType === 'stage1_start') {
+          updateStreamState(conversationId, prev => ({
+            stageTimings: {
+              ...prev.stageTimings,
+              stage1: { startTime: Date.now(), elapsed: 0, completed: false },
+            },
+          }))
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage1: true },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        if (eventType === 'stage2_start') {
+          updateStreamState(conversationId, prev => ({
+            stageTimings: {
+              ...prev.stageTimings,
+              stage2: { startTime: Date.now(), elapsed: 0, completed: false },
+            },
+          }))
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage1: false, stage2: true },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        if (eventType === 'stage3_start') {
+          updateStreamState(conversationId, prev => ({
+            stageTimings: {
+              ...prev.stageTimings,
+              stage3: { startTime: Date.now(), elapsed: 0, completed: false },
+            },
+          }))
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                loading: { ...lastMsg.loading, stage2: false, stage3: true },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        // Handle stage complete events - mark stage as completed to stop timer
+        if (eventType === 'stage1_complete') {
+          markStageCompleted(conversationId, 'stage1')
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage1: event.data,
+                loading: { ...lastMsg.loading, stage1: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        if (eventType === 'stage2_complete') {
+          markStageCompleted(conversationId, 'stage2')
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage2: event.data,
+                metadata: event.metadata,
+                loading: { ...lastMsg.loading, stage2: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        if (eventType === 'stage3_complete') {
+          markStageCompleted(conversationId, 'stage3')
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                stage3: event.data,
+                loading: { stage1: false, stage2: false, stage3: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+        }
+
+        // Handle completion - clear stream state
+        if (eventType === 'complete') {
+          // Clear stream state since deliberation is complete
+          setConversationStreams(prev => {
+            const { [conversationId]: removed, ...rest } = prev
+            return rest
+          })
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                response_status: 'complete',
+                loading: { stage1: false, stage2: false, stage3: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+          // Refresh conversation list to update the status in sidebar
+          loadConversations()
+          toast.success('Deliberation resumed successfully', {
+            description: event.resumed ? 'Completed using previously saved stage data.' : 'Deliberation completed.',
+          })
+        }
+
+        // Handle errors - clear stream state
+        if (eventType === 'error') {
+          // Clear stream state on error
+          setConversationStreams(prev => {
+            const { [conversationId]: removed, ...rest } = prev
+            return rest
+          })
+          setCurrentConversation(prev => {
+            if (!prev?.messages?.length) return prev
+            const messages = [...prev.messages]
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+              messages[messages.length - 1] = {
+                ...lastMsg,
+                response_status: 'failed',
+                loading: { stage1: false, stage2: false, stage3: false },
+              }
+            }
+            return { ...prev, messages }
+          })
+          toast.error('Resume failed', {
+            description: event.message || 'An error occurred while resuming.',
+          })
+        }
+      }, { signal: controller.signal })
+
+    } catch (error) {
+      console.error('[Resume] Error:', error)
+      // Clear stream state on error
+      setConversationStreams(prev => {
+        const { [conversationId]: removed, ...rest } = prev
+        return rest
+      })
+      if (!isConnectionError(error)) {
+        toast.error('Failed to resume deliberation', {
+          description: error.message || 'Please try again.',
+        })
+      }
+      // Revert the loading state
+      setCurrentConversation(prev => {
+        if (!prev?.messages?.length) return prev
+        const messages = [...prev.messages]
+        const lastMsg = messages[messages.length - 1]
+        if (lastMsg?.role === 'assistant' && lastMsg.response_id === responseId) {
+          messages[messages.length - 1] = {
+            ...lastMsg,
+            response_status: 'failed',
+            loading: { stage1: false, stage2: false, stage3: false },
+          }
+        }
+        return { ...prev, messages }
+      })
+    } finally {
+      // Clear resuming state
+      setResumingResponses(prev => {
+        const { [responseId]: removed, ...rest } = prev
+        return rest
+      })
+    }
+  }, [currentConversationId, currentConversation, updateStreamState, markStageCompleted, loadConversations])
+
+  /**
+   * Start polling for updates on an in-progress conversation.
+   * @param {string} conversationId - The conversation ID to poll
+   * @param {string} initialStatus - The initial response_status for UI display
+   * @param {string} responseId - The response ID (needed for cancel functionality)
+   */
+  const startPolling = useCallback((conversationId, initialStatus, responseId = null) => {
+    // Don't start if already polling
+    if (pollingIntervalsRef.current.has(conversationId)) return
+
+    console.log(`[Polling] Starting polling for conversation ${conversationId}, responseId=${responseId}`)
+
+    // Add to polling state for UI indicator (include responseId for cancel functionality)
+    setPollingConversations(prev => ({
+      ...prev,
+      [conversationId]: { status: initialStatus, responseId }
+    }))
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const conv = await api.getConversation(conversationId)
+
+        // Update the conversation in state
+        setCurrentConversation(prev => {
+          // Only update if we're still viewing this conversation
+          if (prev?.id === conversationId) {
+            return conv
+          }
+          return prev
+        })
+
+        // Check if the last assistant message is still in progress
+        const lastMessage = conv.messages?.[conv.messages.length - 1]
+        if (lastMessage?.role === 'assistant') {
+          const status = lastMessage.response_status
+
+          if (!isInProgressStatus(status)) {
+            // Deliberation completed or failed - stop polling FIRST to prevent
+            // any race condition where the UI briefly shows polling state alongside
+            // completed Stage 3 content (Issue 5 fix)
+            console.log(`[Polling] Conversation ${conversationId} finished with status: ${status}`)
+            stopPolling(conversationId)
+
+            if (status === 'complete') {
+              toast.success('Deliberation completed', {
+                description: 'The conversation has been updated with the final results.',
+              })
+            } else if (status === 'failed') {
+              // Note: No isConnectionError() check needed here because the 'failed'
+              // status comes from the database, meaning the backend successfully
+              // stored the error state - this is not a connection failure.
+              toast.error('Deliberation failed', {
+                description: 'The processing encountered an error.',
+              })
+            }
+          } else {
+            // Still in progress - update polling state with current status and responseId
+            const responseId = lastMessage.response_id
+            setPollingConversations(prev => ({
+              ...prev,
+              [conversationId]: { status, responseId }
+            }))
+          }
+        }
+      } catch (error) {
+        console.error(`[Polling] Error polling conversation ${conversationId}:`, error)
+        // Stop polling on error to prevent infinite retries
+        stopPolling(conversationId)
+
+        // Show error toast only for non-connection errors (Issue 6 fix)
+        // Connection errors are already handled by ConnectionErrorBanner
+        if (!isConnectionError(error)) {
+          toast.error('Failed to check deliberation status', {
+            description: 'Polling stopped. Refresh the page to check for updates.',
+          })
+        }
+      }
+    }, 3000) // Poll every 3 seconds
+
+    pollingIntervalsRef.current.set(conversationId, pollInterval)
+  }, [stopPolling])
+
+  // Cleanup all polling on unmount
+  useEffect(() => {
+    return () => {
+      pollingIntervalsRef.current.forEach((intervalId, conversationId) => {
+        clearInterval(intervalId)
+      })
+      pollingIntervalsRef.current.clear()
+    }
+  }, [])
+
   const loadConversation = async (id) => {
     try {
       const conv = await api.getConversation(id)
       setCurrentConversation(conv)
+
+      // Check if the last assistant message has an in-progress deliberation
+      const lastMessage = conv.messages?.[conv.messages.length - 1]
+      if (lastMessage?.role === 'assistant' && isInProgressStatus(lastMessage.response_status)) {
+        const status = lastMessage.response_status
+        const responseId = lastMessage.response_id
+        console.log(`[Recovery] Detected in-progress deliberation: ${status}, responseId=${responseId}`)
+
+        // Start polling for updates (pass status and responseId for UI indicator and cancel)
+        startPolling(id, status, responseId)
+
+        // Show a toast to inform the user
+        toast.info('Deliberation in progress', {
+          description: `${getStageFromStatus(status)} is still running. Updates will appear automatically.`,
+          duration: 5000,
+        })
+      }
     } catch (error) {
       console.error('Failed to load conversation:', error)
       // Skip toast for connection errors - the ConnectionErrorBanner handles those
@@ -414,7 +1014,12 @@ export default function CopilotFeature({ initialConversationId }) {
 
   const handleNewConversation = () => {
     // NOTE: We do NOT abort the current conversation's stream - it continues in background!
-    // Just switch to a new draft conversation
+    // However, we DO stop polling since polling is only for the currently viewed conversation.
+    if (currentConversationId && pollingIntervalsRef.current.has(currentConversationId)) {
+      stopPolling(currentConversationId)
+    }
+
+    // Switch to a new draft conversation
     setCurrentConversationId(null)
     setCurrentConversation({
       id: null,
@@ -427,9 +1032,18 @@ export default function CopilotFeature({ initialConversationId }) {
    * Handle conversation selection from sidebar.
    * CRITICAL: We do NOT abort streams when switching - they continue in background.
    * The UI will sync to the target conversation's stream state (if any) via effects.
+   *
+   * However, we DO stop polling for the previous conversation since polling is only
+   * relevant for the currently viewed conversation (unlike streams which run in background).
    */
   const handleSelectConversation = (id) => {
     if (id === currentConversationId) return // Already viewing this conversation
+
+    // Stop polling for the previous conversation (if any) to prevent unnecessary API calls
+    if (currentConversationId && pollingIntervalsRef.current.has(currentConversationId)) {
+      stopPolling(currentConversationId)
+    }
+
     setCurrentConversationId(id)
   }
 
@@ -561,6 +1175,12 @@ export default function CopilotFeature({ initialConversationId }) {
       // If this conversation already has an active stream, abort it first
       if (streamControllersRef.current.has(conversationId)) {
         abortStream(conversationId)
+      }
+
+      // If this conversation is being polled (recovery mode), stop polling
+      // since we're starting a fresh stream that will provide real-time updates
+      if (pollingIntervalsRef.current.has(conversationId)) {
+        stopPolling(conversationId)
       }
 
       // Create new AbortController for this conversation
@@ -948,7 +1568,7 @@ export default function CopilotFeature({ initialConversationId }) {
       }
     },
 
-    error: (conversationId, event, { content, originalQuery }) => {
+    error: async (conversationId, event, { content, originalQuery }) => {
       console.error('Stream error:', event.message, 'Stage:', event.stage || 'unknown')
 
       // Use ref to get current value at event time, not stale closure value
@@ -965,32 +1585,69 @@ export default function CopilotFeature({ initialConversationId }) {
         completedStages.stage1 = event.stage1_data
       }
 
-      // Extract completed stage data from the current stream state's conversation
+      // If the error event includes response_id, fetch partial data from backend
+      // This is the most reliable source for smart retry as it's persisted to DB
+      if (event.response_id) {
+        console.log('[SmartRetry] Fetching partial stages from backend for response:', event.response_id)
+        try {
+          const partialData = await api.getPartialStages(event.response_id)
+          if (partialData) {
+            // Use persisted stage data if available
+            if (partialData.stage1_responses && !completedStages.stage1) {
+              console.log('[SmartRetry] Using stage1_responses from backend:', partialData.stage1_responses.length)
+              completedStages.stage1 = partialData.stage1_responses
+            }
+            if (partialData.stage2_evaluations && !completedStages.stage2) {
+              console.log('[SmartRetry] Using stage2_evaluations from backend')
+              completedStages.stage2 = partialData.stage2_evaluations
+              completedStages.stage2Metadata = partialData.metadata || null
+            }
+            // Also check partial_stages for individual model responses (Stage 1 failed mid-way)
+            if (!completedStages.stage1 && partialData.partial_stages?.[1]?.length > 0) {
+              const successfulResponses = partialData.partial_stages[1]
+                .filter(r => r.status === 'success')
+                .map(r => ({
+                  model: r.model_name,
+                  response: r.response_content?.content || r.response_content,
+                }))
+              if (successfulResponses.length > 0) {
+                console.log('[SmartRetry] Using partial Stage 1 responses from backend:', successfulResponses.length)
+                completedStages.stage1 = successfulResponses
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[SmartRetry] Failed to fetch partial stages from backend:', err)
+          // Fall through to in-memory fallback
+        }
+      }
+
+      // Fallback: Extract completed stage data from the current stream state's conversation
       setConversationStreams(prev => {
         const streamState = prev[conversationId]
         if (streamState?.conversation?.messages?.length) {
           const messages = streamState.conversation.messages
           const lastMsg = messages[messages.length - 1]
           if (lastMsg?.role === 'assistant') {
-            // Capture any completed stage data (only if not already set from event)
+            // Capture any completed stage data (only if not already set from event or backend)
             if (!completedStages.stage1) {
               if (lastMsg.stage1) {
                 completedStages.stage1 = lastMsg.stage1
               } else if (streamState.partialStage1Responses?.length > 0) {
                 // Stage 1 didn't complete, but we have partial responses from model_response events
                 // Use these for smart retry so we don't lose successful model responses
-                console.log('[SmartRetry] Capturing partial Stage 1 responses:', streamState.partialStage1Responses.length)
+                console.log('[SmartRetry] Capturing partial Stage 1 responses from memory:', streamState.partialStage1Responses.length)
                 completedStages.stage1 = streamState.partialStage1Responses
               }
             }
-            if (lastMsg.stage2) {
+            if (!completedStages.stage2 && lastMsg.stage2) {
               completedStages.stage2 = lastMsg.stage2
               completedStages.stage2Metadata = lastMsg.metadata || null
             }
           }
         } else if (!completedStages.stage1 && streamState?.partialStage1Responses?.length > 0) {
           // No messages yet but we have partial responses (edge case)
-          console.log('[SmartRetry] Capturing partial Stage 1 responses (no messages):', streamState.partialStage1Responses.length)
+          console.log('[SmartRetry] Capturing partial Stage 1 responses from memory (no messages):', streamState.partialStage1Responses.length)
           completedStages.stage1 = streamState.partialStage1Responses
         }
         return prev // No changes to state, just reading
@@ -1091,6 +1748,9 @@ export default function CopilotFeature({ initialConversationId }) {
         onNewConversation={handleNewConversation}
         processingConversations={processingConversations}
         isLoadingConversations={isLoadingConversations}
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMoreConversations}
+        onLoadMore={loadMoreConversations}
       />
       <ChatInterface
         conversation={currentConversation}
@@ -1104,6 +1764,15 @@ export default function CopilotFeature({ initialConversationId }) {
         onRetry={handleRetryMessage}
         onClearError={handleClearError}
         onCancelStream={handleCancelStream}
+        // Polling state for recovery after browser refresh
+        pollingStatus={currentConversationId ? pollingConversations[currentConversationId]?.status : null}
+        pollingResponseId={currentConversationId ? pollingConversations[currentConversationId]?.responseId : null}
+        onStopPolling={currentConversationId ? () => stopPolling(currentConversationId) : null}
+        onCancelDeliberation={currentConversationId ? (responseId) => handleCancelDeliberation(currentConversationId, responseId) : null}
+        isCancellingDeliberation={currentConversationId ? !!cancellingConversations[currentConversationId] : false}
+        // Resume functionality for failed persisted responses
+        onResumeDeliberation={handleResumeDeliberation}
+        resumingResponseId={Object.keys(resumingResponses).find(id => resumingResponses[id]) || null}
       />
     </div>
   )

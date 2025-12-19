@@ -279,10 +279,16 @@ export const api = {
   },
 
   /**
-   * List all conversations for the authenticated user.
+   * List conversations for the authenticated user with pagination.
+   *
+   * @param {Object} options - Pagination options
+   * @param {number} options.limit - Maximum number of conversations to return (default: 10)
+   * @param {number} options.offset - Number of conversations to skip (default: 0)
+   * @returns {Promise<{conversations: Array, has_more: boolean}>}
    */
-  async listConversations() {
-    const response = await this.fetchWithRetry(`${API_BASE}/api/conversations`);
+  async listConversations({ limit = 10, offset = 0 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    const response = await this.fetchWithRetry(`${API_BASE}/api/conversations?${params}`);
     if (!response.ok) {
       if (response.status === 401) {
         throw new Error('Authentication required. Please sign in again.');
@@ -324,6 +330,186 @@ export const api = {
       throw new Error('Failed to get conversation');
     }
     return response.json();
+  },
+
+  /**
+   * Get partial stage data for a response (for smart retry).
+   *
+   * Returns the response status and any partial model responses that were
+   * saved before the deliberation failed. This enables smart retry to
+   * reuse successful model responses without making duplicate API calls.
+   *
+   * @param {string} responseId - The assistant response ID
+   * @returns {Promise<{
+   *   response_id: string,
+   *   response_status: string,
+   *   error_details: object|null,
+   *   stage1_responses: array|null,
+   *   stage2_evaluations: array|null,
+   *   metadata: object|null,
+   *   partial_stages: {1: array, 2: array, 3: array}
+   * }>}
+   */
+  async getPartialStages(responseId) {
+    const response = await this.fetchWithRetry(
+      `${API_BASE}/api/responses/${responseId}/partial-stages`
+    );
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+      if (response.status === 404) {
+        return null; // Response not found
+      }
+      throw new Error('Failed to get partial stages');
+    }
+    return response.json();
+  },
+
+  /**
+   * Cancel/abort a stale or orphaned deliberation.
+   *
+   * This marks an in-progress response as 'failed' so the user can retry.
+   * Used when a browser refresh interrupted a deliberation or when the
+   * backend process stalled.
+   *
+   * @param {string} responseId - The response ID to cancel
+   * @returns {Promise<{success: boolean, response_id: string, previous_status: string, new_status: string, message: string}>}
+   */
+  async cancelResponse(responseId) {
+    const response = await this.fetchWithRetry(
+      `${API_BASE}/api/responses/${responseId}/cancel`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+      if (response.status === 404) {
+        throw new Error('Response not found');
+      }
+      if (response.status === 400) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Cannot cancel this deliberation');
+      }
+      throw new Error('Failed to cancel deliberation');
+    }
+    return response.json();
+  },
+
+  /**
+   * Resume a failed deliberation from the last completed stage.
+   *
+   * This endpoint checks which stages have already been completed and
+   * streams the remaining stages, reusing persisted stage data.
+   *
+   * @param {string} responseId - The response ID to resume
+   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
+   * @param {Object} options - Additional options
+   * @param {AbortSignal|null} options.signal - AbortController signal for cancellation
+   * @returns {Promise<void>}
+   */
+  async resumeDeliberation(responseId, onEvent, options = {}) {
+    const { signal = null } = options;
+    const authHeaders = await this.getAuthHeaders();
+
+    const fetchOptions = {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+    };
+
+    if (signal) {
+      fetchOptions.signal = signal;
+    }
+
+    const response = await fetch(
+      `${API_BASE}/api/responses/${responseId}/resume`,
+      fetchOptions
+    );
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Try refreshing token and retry once
+        const newHeaders = await this.getAuthHeaders(true);
+        fetchOptions.headers = { ...newHeaders, 'Content-Type': 'application/json' };
+        const retryResponse = await fetch(
+          `${API_BASE}/api/responses/${responseId}/resume`,
+          fetchOptions
+        );
+        if (!retryResponse.ok) {
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        // Process the retry response (continue with same SSE handling below)
+        await this._processSSEStream(retryResponse, onEvent);
+        return;
+      }
+      if (response.status === 404) {
+        throw new Error('Response not found');
+      }
+      if (response.status === 400) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Cannot resume this deliberation');
+      }
+      throw new Error('Failed to resume deliberation');
+    }
+
+    await this._processSSEStream(response, onEvent);
+  },
+
+  /**
+   * Process an SSE stream response, calling onEvent for each event.
+   * @private
+   */
+  async _processSSEStream(response, onEvent) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        console.log('[SSE] Received chunk:', chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
+        buffer += chunk;
+
+        // Process complete events in the buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              console.log('[SSE] Parsed event:', data.type);
+              onEvent(data.type, data);
+            } catch (e) {
+              console.error('[SSE] Failed to parse SSE event:', line, e);
+            }
+          }
+        }
+      }
+
+      // Process any remaining data in buffer
+      if (buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6));
+          console.log('[SSE] Parsed final event:', data.type);
+          onEvent(data.type, data);
+        } catch (e) {
+          // Ignore incomplete final event
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   },
 
   /**

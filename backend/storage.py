@@ -20,12 +20,17 @@ Search Integration:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from supabase import create_client, Client
 
 from .config import SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
+
+# Timeout for stale deliberations (10 minutes)
+# If a deliberation has been in-progress for longer than this, it's considered stale
+# and will be automatically marked as failed when the conversation is loaded.
+STALE_DELIBERATION_TIMEOUT_MINUTES = 10
 
 logger = logging.getLogger(__name__)
 
@@ -206,14 +211,103 @@ def _convert_joined_row_to_messages(row: Dict[str, Any]) -> List[Dict[str, Any]]
             "stage1": response.get("stage1_responses") or [],
             "stage2": response.get("stage2_evaluations") or [],
             "stage3": stage3_data if stage3_data else None,
+            # Include response metadata for recovery of in-progress deliberations
+            "response_id": response.get("id"),
+            "response_status": response.get("response_status"),
         })
 
     return messages
 
 
+def _check_and_mark_stale_deliberations(supabase: Client, conversation_id: str) -> int:
+    """
+    Check for stale in-progress deliberations and mark them as failed.
+
+    A deliberation is considered stale if it has been in an in-progress status
+    for longer than STALE_DELIBERATION_TIMEOUT_MINUTES.
+
+    Args:
+        supabase: Supabase client
+        conversation_id: The conversation to check
+
+    Returns:
+        Number of stale deliberations that were marked as failed
+    """
+    # Calculate the cutoff time
+    cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=STALE_DELIBERATION_TIMEOUT_MINUTES)
+    cutoff_iso = cutoff_time.isoformat()
+
+    # In-progress statuses that indicate a deliberation is still running
+    in_progress_statuses = [
+        'pending', 'stage1_in_progress', 'stage1_complete',
+        'stage2_in_progress', 'stage2_complete', 'stage3_in_progress'
+    ]
+
+    # Find stale responses for this conversation
+    # We need to join through messages to filter by conversation_id
+    try:
+        # First, get all message IDs for this conversation
+        msg_result = (
+            supabase.table("messages")
+            .select("id")
+            .eq("conversation_id", conversation_id)
+            .execute()
+        )
+
+        if not msg_result.data:
+            return 0
+
+        message_ids = [m["id"] for m in msg_result.data]
+
+        # Find stale responses
+        stale_result = (
+            supabase.table("assistant_responses")
+            .select("id, response_status, created_at")
+            .in_("user_message_id", message_ids)
+            .in_("response_status", in_progress_statuses)
+            .lt("created_at", cutoff_iso)
+            .execute()
+        )
+
+        if not stale_result.data:
+            return 0
+
+        # Mark each stale response as failed
+        stale_count = 0
+        for response in stale_result.data:
+            response_id = response["id"]
+            old_status = response["response_status"]
+            created_at = response["created_at"]
+
+            logger.warning(
+                f"[STALE] Marking stale deliberation as failed: "
+                f"response_id={response_id}, status={old_status}, created_at={created_at}"
+            )
+
+            supabase.table("assistant_responses").update({
+                "response_status": "failed",
+                "error_details": {
+                    "error": f"Deliberation timed out after {STALE_DELIBERATION_TIMEOUT_MINUTES} minutes",
+                    "failed_stage": old_status,
+                    "timeout_detected_at": datetime.now(timezone.utc).isoformat()
+                }
+            }).eq("id", response_id).execute()
+
+            stale_count += 1
+
+        return stale_count
+
+    except Exception as e:
+        logger.error(f"[STALE] Error checking for stale deliberations: {e}")
+        return 0
+
+
 def get_conversation(conversation_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """
     Load a conversation from storage.
+
+    Also checks for and marks stale deliberations (in-progress for >10 minutes)
+    as failed before returning the conversation data.
 
     Args:
         conversation_id: Unique identifier for the conversation
@@ -239,6 +333,12 @@ def get_conversation(conversation_id: str, user_id: str) -> Optional[Dict[str, A
 
     conv_row = conv_result.data[0]
 
+    # Check for and mark stale deliberations before fetching messages
+    # This ensures the frontend sees the correct 'failed' status for timed-out deliberations
+    stale_count = _check_and_mark_stale_deliberations(supabase, conversation_id)
+    if stale_count > 0:
+        logger.info(f"[STALE] Marked {stale_count} stale deliberation(s) as failed for conversation {conversation_id}")
+
     # Fetch messages with nested assistant responses using Supabase nested select
     # This performs a LEFT JOIN automatically via the FK relationship
     msg_result = (
@@ -263,39 +363,48 @@ def get_conversation(conversation_id: str, user_id: str) -> Optional[Dict[str, A
     }
 
 
-def list_conversations(user_id: str) -> List[Dict[str, Any]]:
+def list_conversations(
+    user_id: str,
+    limit: int = 10,
+    offset: int = 0
+) -> Dict[str, Any]:
     """
-    List all conversations for a user (metadata only).
+    List conversations for a user with pagination (metadata only).
 
     Args:
         user_id: WorkOS user ID for scoping
+        limit: Maximum number of conversations to return (default: 10)
+        offset: Number of conversations to skip (default: 0)
 
     Returns:
-        List of conversation metadata dicts with id, created_at, title, message_count
+        Dict with 'conversations' list and 'has_more' boolean
     """
     supabase = get_supabase_client()
 
-    # Fetch conversations with message counts using a join
-    # We'll get all conversations and then count messages in Python for simplicity
+    # Fetch conversations with message counts using a nested select
+    # This avoids N+1 queries by getting messages in a single request
+    # Request one extra to determine if there are more results
     conv_result = (
         supabase.table("conversations")
-        .select("id, created_at, title")
+        .select("id, created_at, title, messages(id)")
         .eq("user_id", user_id)
         .eq("is_deleted", False)
         .order("created_at", desc=True)
+        .range(offset, offset + limit)  # Supabase range is inclusive
         .execute()
     )
 
     conversations = []
-    for row in conv_result.data or []:
-        # Count messages for each conversation
-        msg_count_result = (
-            supabase.table("messages")
-            .select("id", count="exact")
-            .eq("conversation_id", row["id"])
-            .execute()
-        )
-        message_count = msg_count_result.count if msg_count_result.count else 0
+    data = conv_result.data or []
+
+    # Check if there are more results (we requested limit+1 to check)
+    has_more = len(data) > limit
+
+    # Only process up to 'limit' items
+    for row in data[:limit]:
+        # Count messages from the nested select result
+        messages_data = row.get("messages", [])
+        message_count = len(messages_data) if messages_data else 0
 
         conversations.append({
             "id": row["id"],
@@ -304,7 +413,10 @@ def list_conversations(user_id: str) -> List[Dict[str, Any]]:
             "message_count": message_count,
         })
 
-    return conversations
+    return {
+        "conversations": conversations,
+        "has_more": has_more,
+    }
 
 
 def _verify_conversation_ownership(conversation_id: str, user_id: str) -> bool:
@@ -437,6 +549,7 @@ def create_response_placeholder(user_message_id: str) -> str:
         "stage1_responses": None,
         "stage2_evaluations": None,
         "stage3_synthesis": None,
+        "response_status": "pending",  # Will be updated as stages progress
     }
 
     result = supabase.table("assistant_responses").insert(response_data).execute()
@@ -497,6 +610,7 @@ def update_response_stage1(
         .update({
             "stage1_responses": stage1_responses,
             "stage1_duration_ms": stage1_duration_ms,
+            "response_status": "stage1_complete",
         })
         .eq("id", response_id)
         .execute()
@@ -526,6 +640,7 @@ def update_response_stage2(
     update_data = {
         "stage2_evaluations": stage2_evaluations,
         "stage2_duration_ms": stage2_duration_ms,
+        "response_status": "stage2_complete",
     }
     if metadata is not None:
         update_data["metadata"] = metadata
@@ -549,6 +664,9 @@ def update_response_stage3(
     """
     Update an assistant response with Stage 3 results.
 
+    Also cleans up partial stage responses since the aggregated data
+    is now saved and we don't need the granular per-model rows.
+
     Args:
         response_id: The assistant response ID to update
         stage3_synthesis: Final synthesized response
@@ -561,6 +679,7 @@ def update_response_stage3(
         .update({
             "stage3_synthesis": stage3_synthesis,
             "stage3_duration_ms": stage3_duration_ms,
+            "response_status": "complete",
         })
         .eq("id", response_id)
         .execute()
@@ -568,6 +687,9 @@ def update_response_stage3(
 
     if not result.data:
         raise RuntimeError(f"Failed to update response stage3: {result}")
+
+    # Clean up partial stage responses since we're now complete
+    cleanup_partial_stage_responses(response_id)
 
 
 def update_conversation_title(conversation_id: str, user_id: str, title: str):
@@ -639,3 +761,277 @@ def update_conversation_queries(
         _safe_update_conversation_in_index(
             conversation_id, {"original_query": original_query}
         )
+
+
+# =============================================================================
+# Incremental Persistence for Model Responses
+# =============================================================================
+
+
+def update_response_status(response_id: str, status: str):
+    """
+    Update the response_status of an assistant response.
+
+    Valid statuses:
+        - 'pending': Just created, no stages started
+        - 'stage1_in_progress': Stage 1 running
+        - 'stage1_complete': Stage 1 done
+        - 'stage2_in_progress': Stage 2 running
+        - 'stage2_complete': Stage 2 done
+        - 'stage3_in_progress': Stage 3 running
+        - 'complete': All stages done
+        - 'failed': Deliberation failed
+
+    Args:
+        response_id: The assistant response ID
+        status: New status value
+    """
+    supabase = get_supabase_client()
+
+    result = (
+        supabase.table("assistant_responses")
+        .update({"response_status": status})
+        .eq("id", response_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise RuntimeError(f"Failed to update response status: {result}")
+
+
+def set_response_error(response_id: str, error_message: str, error_stage: str):
+    """
+    Mark a response as failed with error details.
+
+    Args:
+        response_id: The assistant response ID
+        error_message: Human-readable error message
+        error_stage: Which stage failed ('stage1', 'stage2', 'stage3')
+    """
+    supabase = get_supabase_client()
+
+    result = (
+        supabase.table("assistant_responses")
+        .update({
+            "response_status": "failed",
+            "error_details": {
+                "message": error_message,
+                "stage": error_stage,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        .eq("id", response_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise RuntimeError(f"Failed to set response error: {result}")
+
+
+def save_model_response(
+    assistant_response_id: str,
+    stage: int,
+    model_name: str,
+    response_content: Optional[Dict[str, Any]],
+    elapsed_ms: int,
+    success: bool,
+    error_message: Optional[str] = None,
+):
+    """
+    Save an individual model response as it completes during Stage 1.
+
+    This enables incremental persistence - if Stage 1 fails after some models
+    have responded, smart retry can reuse the saved responses.
+
+    Args:
+        assistant_response_id: The assistant response this belongs to
+        stage: Stage number (1, 2, or 3)
+        model_name: Model identifier (e.g., 'openai/gpt-5.2-pro')
+        response_content: The model's response (JSONB)
+        elapsed_ms: Time taken for this model to respond
+        success: Whether the model responded successfully
+        error_message: Error message if failed
+    """
+    supabase = get_supabase_client()
+
+    data = {
+        "assistant_response_id": assistant_response_id,
+        "stage": stage,
+        "model_name": model_name,
+        "response_content": response_content,
+        "elapsed_ms": elapsed_ms,
+        "status": "success" if success else "failed",
+        "error_message": error_message,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Use upsert to handle retries (unique constraint on assistant_response_id, stage, model_name)
+    result = (
+        supabase.table("stage_model_responses")
+        .upsert(data, on_conflict="assistant_response_id,stage,model_name")
+        .execute()
+    )
+
+    if not result.data:
+        raise RuntimeError(f"Failed to save model response: {result}")
+
+    return result.data[0]["id"]
+
+
+def get_partial_stage_responses(
+    assistant_response_id: str,
+    stage: int,
+) -> List[Dict[str, Any]]:
+    """
+    Get all successful model responses for a stage.
+
+    Used for smart retry to reuse responses from models that already completed.
+
+    Args:
+        assistant_response_id: The assistant response ID
+        stage: Stage number (1, 2, or 3)
+
+    Returns:
+        List of model response dicts with model_name, response_content, elapsed_ms
+    """
+    supabase = get_supabase_client()
+
+    result = (
+        supabase.table("stage_model_responses")
+        .select("model_name, response_content, elapsed_ms")
+        .eq("assistant_response_id", assistant_response_id)
+        .eq("stage", stage)
+        .eq("status", "success")
+        .order("completed_at")
+        .execute()
+    )
+
+    return result.data or []
+
+
+def get_response_with_partial_stages(
+    response_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Get an assistant response with its partial stage data.
+
+    Used to retrieve incomplete responses for smart retry.
+
+    Args:
+        response_id: The assistant response ID
+
+    Returns:
+        Dict with response data and partial_stages, or None if not found
+    """
+    supabase = get_supabase_client()
+
+    # Get the response
+    response_result = (
+        supabase.table("assistant_responses")
+        .select("*")
+        .eq("id", response_id)
+        .execute()
+    )
+
+    if not response_result.data:
+        return None
+
+    response = response_result.data[0]
+
+    # Get partial stage responses
+    partial_result = (
+        supabase.table("stage_model_responses")
+        .select("stage, model_name, response_content, elapsed_ms, status")
+        .eq("assistant_response_id", response_id)
+        .order("stage, completed_at")
+        .execute()
+    )
+
+    # Group by stage
+    partial_stages: Dict[int, List[Dict]] = {1: [], 2: [], 3: []}
+    for row in (partial_result.data or []):
+        stage = row["stage"]
+        if stage in partial_stages:
+            partial_stages[stage].append({
+                "model_name": row["model_name"],
+                "response_content": row["response_content"],
+                "elapsed_ms": row["elapsed_ms"],
+                "status": row["status"],
+            })
+
+    return {
+        "response": response,
+        "partial_stages": partial_stages,
+    }
+
+
+def cleanup_partial_stage_responses(assistant_response_id: str):
+    """
+    Delete partial stage responses after a response completes successfully.
+
+    The aggregated data is already in assistant_responses.stage1/2/3_*,
+    so we can remove the granular per-model rows to save space.
+
+    Args:
+        assistant_response_id: The assistant response ID
+    """
+    supabase = get_supabase_client()
+
+    try:
+        supabase.table("stage_model_responses").delete().eq(
+            "assistant_response_id", assistant_response_id
+        ).execute()
+    except Exception as e:
+        # Log but don't fail - this is cleanup, not critical path
+        logger.warning(
+            f"Failed to cleanup partial stage responses for {assistant_response_id}: {e}"
+        )
+
+
+def get_incomplete_responses_for_conversation(
+    conversation_id: str,
+    user_id: str,
+) -> List[Dict[str, Any]]:
+    """
+    Get all incomplete assistant responses for a conversation.
+
+    Used to detect if there are any in-progress or failed responses
+    that could be resumed.
+
+    Args:
+        conversation_id: The conversation ID
+        user_id: WorkOS user ID for scoping
+
+    Returns:
+        List of incomplete response dicts
+    """
+    supabase = get_supabase_client()
+
+    # First verify conversation ownership
+    if not _verify_conversation_ownership(conversation_id, user_id):
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    # Get message IDs for this conversation
+    msg_result = (
+        supabase.table("messages")
+        .select("id")
+        .eq("conversation_id", conversation_id)
+        .execute()
+    )
+
+    if not msg_result.data:
+        return []
+
+    message_ids = [m["id"] for m in msg_result.data]
+
+    # Get incomplete responses for these messages
+    response_result = (
+        supabase.table("assistant_responses")
+        .select("id, user_message_id, response_status, error_details, created_at")
+        .in_("user_message_id", message_ids)
+        .neq("response_status", "complete")
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    return response_result.data or []

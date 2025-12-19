@@ -288,3 +288,103 @@ export function StageProgress({ stage, label, timing, onCancel }) {
   );
 }
 
+/**
+ * Recovery indicator shown when polling for an in-progress deliberation
+ * that was interrupted (e.g., by browser refresh).
+ *
+ * @param {Object} props
+ * @param {string} props.status - The current response_status from the database
+ * @param {function} props.onStopPolling - Callback to stop polling (hide this indicator)
+ * @param {function} props.onCancel - Callback to cancel/abort the stale deliberation
+ * @param {boolean} props.isCancelling - Whether a cancel request is in progress
+ */
+export function RecoveryProgress({ status, onStopPolling, onCancel, isCancelling = false }) {
+  const getStatusInfo = () => {
+    switch (status) {
+      case 'pending':
+      case 'stage1_in_progress':
+        return {
+          label: 'Stage 1: Collecting responses',
+          description: 'Waiting for model responses...',
+          stage: 1
+        }
+      case 'stage1_complete':
+      case 'stage2_in_progress':
+        return {
+          label: 'Stage 2: Peer rankings',
+          description: 'Models are evaluating each other\'s responses...',
+          stage: 2
+        }
+      case 'stage2_complete':
+      case 'stage3_in_progress':
+        return {
+          label: 'Stage 3: Final synthesis',
+          description: 'Synthesizing the final answer...',
+          stage: 3
+        }
+      default:
+        return {
+          label: 'Processing',
+          description: 'Deliberation in progress...',
+          stage: 0
+        }
+    }
+  }
+
+  const { label, description, stage } = getStatusInfo()
+  const stageStyle = getStageStyle(stage || 1)
+
+  return (
+    <Card className="border-dashed border-amber-500/50 bg-amber-50/30">
+      <CardContent className="pt-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Loader2 className={cn("h-4 w-4 animate-spin", stageStyle.iconColor)} />
+            <div>
+              <span className="text-sm font-medium">{label}</span>
+              <p className="text-xs text-muted-foreground">{description}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-amber-600">
+              <Clock className="h-3.5 w-3.5" />
+              <span>Reconnecting...</span>
+            </div>
+            {/* Cancel button - marks the stale deliberation as failed so user can retry */}
+            {onCancel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCancel}
+                disabled={isCancelling}
+                className="h-6 px-2 text-destructive border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                title="Cancel this stale deliberation and retry"
+              >
+                {isCancelling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <XCircle className="h-3.5 w-3.5 mr-1" />
+                    <span className="text-xs">Cancel</span>
+                  </>
+                )}
+              </Button>
+            )}
+            {/* Stop polling button - just hides the indicator without cancelling */}
+            {onStopPolling && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onStopPolling}
+                className="h-6 px-2 text-muted-foreground hover:text-foreground"
+                title="Stop waiting for updates (deliberation continues in background)"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}

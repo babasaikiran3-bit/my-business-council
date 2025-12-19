@@ -58,7 +58,7 @@ class TestConversationEndpoints:
         assert response.status_code == 401
 
     def test_list_conversations_with_auth(self, client, mock_auth_user):
-        """Test listing conversations with authentication."""
+        """Test listing conversations with authentication returns paginated response."""
         from backend.auth import get_current_user
 
         app.dependency_overrides[get_current_user] = lambda: mock_auth_user
@@ -66,7 +66,12 @@ class TestConversationEndpoints:
         try:
             response = client.get("/api/conversations")
             assert response.status_code == 200
-            assert isinstance(response.json(), list)
+            data = response.json()
+            assert isinstance(data, dict)
+            assert "conversations" in data
+            assert "has_more" in data
+            assert isinstance(data["conversations"], list)
+            assert isinstance(data["has_more"], bool)
         finally:
             app.dependency_overrides.clear()
 
