@@ -63,3 +63,20 @@
   color: #333;
   line-height: 1.6;
 }
+
+.search-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  padding: 2px 8px;
+  background: #e8f4fd;
+  color: #1976d2;
+  border-radius: 12px;
+  font-size: 11px;
+  font-family: sans-serif;
+}
+
+.search-icon {
+  font-size: 12px;
+}

@@ -8,12 +8,18 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Tavily API key for web search
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+# Enable/disable web search tool
+ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "true").lower() == "true"
+
 # Council members - list of OpenRouter model identifiers
 COUNCIL_MODELS = [
-    "openai/gpt-5.1",
+    "openai/gpt-5.2",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
+    "anthropic/claude-opus-4.5",
+    "x-ai/grok-4.1-fast",
 ]
 
 # Chairman model - synthesizes final response
