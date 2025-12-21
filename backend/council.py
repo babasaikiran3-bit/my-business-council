@@ -3,6 +3,7 @@
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .tools import get_available_tools
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -13,21 +14,26 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
         user_query: The user's question
 
     Returns:
-        List of dicts with 'model' and 'response' keys
+        List of dicts with 'model', 'response', and optional 'tool_calls_made' keys
     """
     messages = [{"role": "user", "content": user_query}]
+    tools = get_available_tools()
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Query all models in parallel with tools
+    responses = await query_models_parallel(COUNCIL_MODELS, messages, tools=tools)
 
     # Format results
     stage1_results = []
     for model, response in responses.items():
         if response is not None:  # Only include successful responses
-            stage1_results.append({
+            result = {
                 "model": model,
                 "response": response.get('content', '')
-            })
+            }
+            # Include tool calls if any were made
+            if response.get('tool_calls_made'):
+                result['tool_calls_made'] = response['tool_calls_made']
+            stage1_results.append(result)
 
     return stage1_results
 
@@ -93,9 +99,10 @@ FINAL RANKING:
 Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
+    tools = get_available_tools()
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Get rankings from all council models in parallel with tools
+    responses = await query_models_parallel(COUNCIL_MODELS, messages, tools=tools)
 
     # Format results
     stage2_results = []
@@ -157,9 +164,10 @@ Your task as Chairman is to synthesize all of this information into a single, co
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
+    tools = get_available_tools()
 
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    # Query the chairman model with tools
+    response = await query_model(CHAIRMAN_MODEL, messages, tools=tools)
 
     if response is None:
         # Fallback if chairman fails
@@ -168,10 +176,16 @@ Provide a clear, well-reasoned final answer that represents the council's collec
             "response": "Error: Unable to generate final synthesis."
         }
 
-    return {
+    result = {
         "model": CHAIRMAN_MODEL,
         "response": response.get('content', '')
     }
+
+    # Include tool calls if chairman used any
+    if response.get('tool_calls_made'):
+        result['tool_calls_made'] = response['tool_calls_made']
+
+    return result
 
 
 def parse_ranking_from_text(ranking_text: str) -> List[str]:

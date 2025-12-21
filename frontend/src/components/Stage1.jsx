@@ -26,7 +26,15 @@ export default function Stage1({ responses }) {
       </div>
 
       <div className="tab-content">
-        <div className="model-name">{responses[activeTab].model}</div>
+        <div className="model-name">
+          {responses[activeTab].model}
+          {responses[activeTab].tool_calls_made && (
+            <span className="search-indicator" title="This model used web search">
+              <span className="search-icon">&#128269;</span>
+              {responses[activeTab].tool_calls_made.length} search{responses[activeTab].tool_calls_made.length !== 1 ? 'es' : ''}
+            </span>
+          )}
+        </div>
         <div className="response-text markdown-content">
           <ReactMarkdown>{responses[activeTab].response}</ReactMarkdown>
         </div>
