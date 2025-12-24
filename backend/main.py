@@ -11,6 +11,7 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .context import build_context_messages
 
 app = FastAPI(title="LLM Council API")
 
@@ -101,10 +102,12 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+    messages = await build_context_messages(
+        conversation["messages"][:-1],
         request.content
     )
+
+    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(messages)
 
     # Add assistant message with all stages
     storage.add_assistant_message(
@@ -147,9 +150,14 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
+            messages = await build_context_messages(
+                conversation["messages"][:-1],
+                request.content
+            )
+
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(messages)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings

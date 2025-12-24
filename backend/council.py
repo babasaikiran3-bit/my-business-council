@@ -5,19 +5,16 @@ from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
-        user_query: The user's question
+        messages: Full message history including current query
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
-
-    # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
@@ -293,35 +290,34 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(messages: List[Dict[str, str]]) -> Tuple[List, List, Dict, Dict]:
     """
-    Run the complete 3-stage council process.
+    Run the complete 3-stage council process with conversation context.
 
     Args:
-        user_query: The user's question
+        messages: Full message history in OpenAI format
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    current_query = messages[-1]["content"]
+    
+    stage1_results = await stage1_collect_responses(messages)
 
-    # If no models responded successfully, return error
     if not stage1_results:
         return [], [], {
             "model": "error",
             "response": "All models failed to respond. Please try again."
         }, {}
 
-    # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(current_query, stage1_results)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
-        user_query,
+        current_query,
         stage1_results,
         stage2_results
     )

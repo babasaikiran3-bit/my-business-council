@@ -33,6 +33,21 @@
   font-size: 16px;
 }
 
+.context-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #f8f9ff 0%, #f0f7ff 100%);
+  border: 1px solid #d0e7ff;
+  border-radius: 8px;
+  color: #4a90e2;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
 .message-group {
   margin-bottom: 32px;
 }
