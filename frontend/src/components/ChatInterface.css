@@ -42,6 +42,17 @@
   margin-bottom: 16px;
 }
 
+.user-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-message .copy-button {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .message-label {
   font-size: 12px;
   font-weight: 600;
