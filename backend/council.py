@@ -255,6 +255,401 @@ def calculate_aggregate_rankings(
     return aggregate
 
 
+def calculate_tournament_rankings(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Calculate rankings using tournament-style pairwise comparison.
+
+    For each pair of models, count how many rankers preferred one over the other.
+    The model with more pairwise wins ranks higher. This method is more robust
+    to outlier rankings than simple position averaging.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+
+    Returns:
+        List of dicts sorted by win_percentage (descending):
+        [
+            {
+                "model": "openai/gpt-4o",
+                "wins": 4.0,
+                "losses": 1.0,
+                "ties": 1.0,
+                "win_percentage": 0.75,
+                "total_matchups": 6
+            },
+            ...
+        ]
+    """
+    from collections import defaultdict
+
+    # Get all models from label_to_model
+    models = list(set(label_to_model.values()))
+
+    if len(models) < 2:
+        # Need at least 2 models for pairwise comparison
+        return [{"model": m, "wins": 0, "losses": 0, "ties": 0, "win_percentage": 0.0, "total_matchups": 0} for m in models]
+
+    # Track pairwise wins: pairwise_wins[(model_a, model_b)] = count of times a ranked above b
+    pairwise_wins = defaultdict(int)
+
+    # Process each ranker's parsed ranking
+    # Use pre-parsed ranking if available, otherwise parse from text
+    for ranking in stage2_results:
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            # Fallback: parse from raw ranking text (consistent with calculate_aggregate_rankings)
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking:
+            continue
+
+        # Convert labels to model names and get their positions
+        model_positions = {}
+        for position, label in enumerate(parsed_ranking):
+            if label in label_to_model:
+                model_name = label_to_model[label]
+                model_positions[model_name] = position
+
+        # For each pair of models, record who was ranked higher (lower position = better)
+        ranked_models = list(model_positions.keys())
+        for i in range(len(ranked_models)):
+            for j in range(i + 1, len(ranked_models)):
+                model_a = ranked_models[i]
+                model_b = ranked_models[j]
+                pos_a = model_positions[model_a]
+                pos_b = model_positions[model_b]
+
+                # Ensure consistent ordering for the key
+                if model_a > model_b:
+                    model_a, model_b = model_b, model_a
+                    pos_a, pos_b = pos_b, pos_a
+
+                if pos_a < pos_b:
+                    pairwise_wins[(model_a, model_b, 'a')] += 1
+                elif pos_b < pos_a:
+                    pairwise_wins[(model_a, model_b, 'b')] += 1
+                # Equal positions would be a tie (shouldn't happen with rankings)
+
+    # Calculate wins, losses, and ties for each model
+    model_stats = {model: {"wins": 0.0, "losses": 0.0, "ties": 0.0} for model in models}
+
+    # Process each unique pair of models
+    processed_pairs = set()
+    for i in range(len(models)):
+        for j in range(i + 1, len(models)):
+            model_a, model_b = models[i], models[j]
+            if model_a > model_b:
+                model_a, model_b = model_b, model_a
+
+            pair_key = (model_a, model_b)
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+
+            a_wins = pairwise_wins.get((model_a, model_b, 'a'), 0)
+            b_wins = pairwise_wins.get((model_a, model_b, 'b'), 0)
+
+            if a_wins > b_wins:
+                model_stats[model_a]["wins"] += 1
+                model_stats[model_b]["losses"] += 1
+            elif b_wins > a_wins:
+                model_stats[model_b]["wins"] += 1
+                model_stats[model_a]["losses"] += 1
+            elif a_wins == b_wins and (a_wins > 0 or b_wins > 0):
+                # Tie - both get 0.5
+                model_stats[model_a]["ties"] += 1
+                model_stats[model_b]["ties"] += 1
+
+    # Calculate win percentage and build results
+    total_possible_matchups = len(models) - 1 if len(models) > 1 else 1
+    results = []
+
+    for model in models:
+        stats = model_stats[model]
+        total_matchups = stats["wins"] + stats["losses"] + stats["ties"]
+        # Win percentage: wins + 0.5*ties / total matchups
+        if total_matchups > 0:
+            win_pct = (stats["wins"] + 0.5 * stats["ties"]) / total_possible_matchups
+        else:
+            win_pct = 0.0
+
+        results.append({
+            "model": model,
+            "wins": stats["wins"],
+            "losses": stats["losses"],
+            "ties": stats["ties"],
+            "win_percentage": round(win_pct, 3),
+            "total_matchups": int(total_matchups)
+        })
+
+    # Sort by win percentage (higher is better)
+    results.sort(key=lambda x: (-x['win_percentage'], x['losses']))
+
+    return results
+
+
+def detect_minority_opinions(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str],
+    tournament_rankings: List[Dict[str, Any]],
+    dissent_threshold: float = 0.3,
+    position_tolerance: int = 1
+) -> List[Dict[str, Any]]:
+    """
+    Detect minority opinions where a significant portion of rankers disagree
+    with the consensus ranking for a specific model.
+
+    A minority opinion is flagged when ≥dissent_threshold of rankers place a model
+    more than position_tolerance positions away from its consensus position.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+        tournament_rankings: Consensus ranking from tournament method
+        dissent_threshold: Minimum fraction of rankers that must disagree (default 0.3 = 30%)
+        position_tolerance: How many positions away counts as disagreement (default 1)
+
+    Returns:
+        List of minority opinion dicts:
+        [
+            {
+                "model": "openai/gpt-4o",
+                "consensus_position": 1,
+                "dissent_positions": [3, 4],  # where dissenters placed it
+                "dissent_rate": 0.4,
+                "dissenters": ["anthropic/claude-3.5-sonnet", "google/gemini-2.0-flash"],
+                "direction": "undervalued"  # or "overvalued" - dissenters think it's worse/better
+            },
+            ...
+        ]
+    """
+    from collections import defaultdict
+
+    if not stage2_results or not tournament_rankings:
+        return []
+
+    # Build consensus position lookup from tournament rankings
+    consensus_positions = {
+        entry["model"]: position + 1  # 1-indexed
+        for position, entry in enumerate(tournament_rankings)
+    }
+
+    # Track each ranker's position for each model
+    # Structure: {model_name: [(ranker_model, position), ...]}
+    model_rankings_by_ranker = defaultdict(list)
+
+    for ranking in stage2_results:
+        ranker_model = ranking.get('model')
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking:
+            continue
+
+        # Record where this ranker placed each model
+        for position, label in enumerate(parsed_ranking, start=1):
+            if label in label_to_model:
+                model_name = label_to_model[label]
+                model_rankings_by_ranker[model_name].append((ranker_model, position))
+
+    # Detect minority opinions for each model
+    minority_opinions = []
+
+    for model_name, rankings in model_rankings_by_ranker.items():
+        if model_name not in consensus_positions:
+            continue
+
+        consensus_pos = consensus_positions[model_name]
+        total_rankers = len(rankings)
+
+        if total_rankers == 0:
+            continue
+
+        # Find dissenters: rankers who placed this model far from consensus
+        dissenters = []
+        dissent_positions = []
+
+        for ranker_model, ranker_position in rankings:
+            position_diff = abs(ranker_position - consensus_pos)
+            if position_diff > position_tolerance:
+                dissenters.append(ranker_model)
+                dissent_positions.append(ranker_position)
+
+        dissent_rate = len(dissenters) / total_rankers
+
+        # Only report if dissent rate meets threshold
+        if dissent_rate >= dissent_threshold and dissenters:
+            # Determine direction: are dissenters ranking it higher or lower?
+            avg_dissent_pos = sum(dissent_positions) / len(dissent_positions)
+            if avg_dissent_pos > consensus_pos:
+                direction = "overvalued"  # consensus ranks it higher than dissenters think
+            else:
+                direction = "undervalued"  # consensus ranks it lower than dissenters think
+
+            minority_opinions.append({
+                "model": model_name,
+                "consensus_position": consensus_pos,
+                "dissent_positions": sorted(set(dissent_positions)),
+                "dissent_rate": round(dissent_rate, 2),
+                "dissenters": dissenters,
+                "direction": direction
+            })
+
+    # Sort by dissent rate (highest first)
+    minority_opinions.sort(key=lambda x: -x['dissent_rate'])
+
+    return minority_opinions
+
+
+def detect_ranking_conflicts(
+    stage2_results: List[Dict[str, Any]],
+    label_to_model: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Detect fundamental conflicts in rankings - cases where rankers strongly
+    disagree about which response is better.
+
+    A conflict is detected when two models rank each other in opposite directions
+    (A ranks B high while B ranks A low, or vice versa). This indicates a
+    fundamental disagreement rather than just different wording preferences.
+
+    Args:
+        stage2_results: Rankings from each model with parsed_ranking
+        label_to_model: Mapping from anonymous labels to model names
+
+    Returns:
+        List of conflict dicts:
+        [
+            {
+                "model_a": "openai/gpt-4o",
+                "model_b": "anthropic/claude-3.5-sonnet",
+                "conflict_type": "mutual_opposition",  # or "ranking_swap"
+                "details": {
+                    "a_ranks_b": 4,  # where model_a placed model_b
+                    "b_ranks_a": 5,  # where model_b placed model_a
+                    "a_self_rank": 1,  # where model_a placed itself
+                    "b_self_rank": 1   # where model_b placed itself
+                },
+                "severity": "high"  # high, medium, low
+            },
+            ...
+        ]
+    """
+    if not stage2_results or not label_to_model:
+        return []
+
+    # Reverse mapping: model name -> label
+    model_to_label = {model: label for label, model in label_to_model.items()}
+
+    # Build a matrix of how each ranker ranked each model
+    # ranker_rankings[ranker_model][ranked_model] = position
+    ranker_rankings = {}
+
+    for ranking in stage2_results:
+        ranker_model = ranking.get('model')
+        parsed_ranking = ranking.get('parsed_ranking')
+        if not parsed_ranking:
+            ranking_text = ranking.get('ranking', '')
+            parsed_ranking = parse_ranking_from_text(ranking_text) if ranking_text else []
+
+        if not parsed_ranking or not ranker_model:
+            continue
+
+        ranker_rankings[ranker_model] = {}
+        for position, label in enumerate(parsed_ranking, start=1):
+            if label in label_to_model:
+                ranked_model = label_to_model[label]
+                ranker_rankings[ranker_model][ranked_model] = position
+
+    conflicts = []
+    models = list(set(label_to_model.values()))
+    processed_pairs = set()
+
+    # Check each pair of models for conflicts
+    for i in range(len(models)):
+        for j in range(i + 1, len(models)):
+            model_a, model_b = models[i], models[j]
+
+            # Ensure consistent pair ordering
+            pair_key = tuple(sorted([model_a, model_b]))
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+
+            # Get how each model ranked the other
+            a_ranks_b = ranker_rankings.get(model_a, {}).get(model_b)
+            b_ranks_a = ranker_rankings.get(model_b, {}).get(model_a)
+            a_self_rank = ranker_rankings.get(model_a, {}).get(model_a)
+            b_self_rank = ranker_rankings.get(model_b, {}).get(model_b)
+
+            if a_ranks_b is None or b_ranks_a is None:
+                continue
+
+            total_models = len(models)
+
+            # Detect mutual opposition: both rank the other poorly while ranking themselves high
+            a_ranks_b_poorly = a_ranks_b > total_models / 2
+            b_ranks_a_poorly = b_ranks_a > total_models / 2
+            a_ranks_self_high = a_self_rank is not None and a_self_rank <= 2
+            b_ranks_self_high = b_self_rank is not None and b_self_rank <= 2
+
+            # Calculate position swap severity
+            # If A puts B at position X and B puts A at position Y, larger |X-Y| = more conflict
+            position_difference = abs(a_ranks_b - b_ranks_a)
+
+            conflict_detected = False
+            conflict_type = None
+            severity = "low"
+
+            # High severity: Mutual opposition with self-promotion
+            if a_ranks_b_poorly and b_ranks_a_poorly and a_ranks_self_high and b_ranks_self_high:
+                conflict_detected = True
+                conflict_type = "mutual_opposition"
+                severity = "high"
+
+            # Medium severity: Large position disagreement
+            elif position_difference >= total_models - 1:
+                conflict_detected = True
+                conflict_type = "ranking_swap"
+                severity = "medium"
+
+            # Lower threshold for smaller councils
+            elif total_models <= 4 and position_difference >= 2:
+                # One ranks the other top 2, other ranks them bottom 2
+                if (a_ranks_b <= 2 and b_ranks_a >= total_models - 1) or \
+                   (b_ranks_a <= 2 and a_ranks_b >= total_models - 1):
+                    conflict_detected = True
+                    conflict_type = "ranking_swap"
+                    severity = "medium"
+
+            if conflict_detected:
+                conflicts.append({
+                    "model_a": model_a,
+                    "model_b": model_b,
+                    "conflict_type": conflict_type,
+                    "details": {
+                        "a_ranks_b": a_ranks_b,
+                        "b_ranks_a": b_ranks_a,
+                        "a_self_rank": a_self_rank,
+                        "b_self_rank": b_self_rank
+                    },
+                    "severity": severity
+                })
+
+    # Sort by severity (high first)
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    conflicts.sort(key=lambda x: severity_order.get(x['severity'], 3))
+
+    return conflicts
+
+
 async def generate_conversation_title(user_query: str) -> str:
     """
     Generate a short title for a conversation based on the first user message.
@@ -316,8 +711,17 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Stage 2: Collect rankings
     stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
 
-    # Calculate aggregate rankings
+    # Calculate aggregate rankings (both methods)
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+    tournament_rankings = calculate_tournament_rankings(stage2_results, label_to_model)
+
+    # Detect minority opinions
+    minority_opinions = detect_minority_opinions(
+        stage2_results, label_to_model, tournament_rankings
+    )
+
+    # Detect ranking conflicts
+    ranking_conflicts = detect_ranking_conflicts(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
@@ -329,7 +733,10 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "tournament_rankings": tournament_rankings,
+        "minority_opinions": minority_opinions,
+        "ranking_conflicts": ranking_conflicts
     }
 
     return stage1_results, stage2_results, stage3_result, metadata
