@@ -1,172 +1,197 @@
-"""JSON-based storage for conversations."""
+"""Conversation storage and management."""
 
 import json
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 from .config import DATA_DIR
 
 
 def ensure_data_dir():
     """Ensure the data directory exists."""
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def get_conversation_path(conversation_id: str) -> str:
-    """Get the file path for a conversation."""
+def get_conversation_filepath(conversation_id: str) -> str:
+    """Get filepath for a conversation."""
+    ensure_data_dir()
     return os.path.join(DATA_DIR, f"{conversation_id}.json")
 
 
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
-    """
-    Create a new conversation.
-
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        New conversation dict
-    """
-    ensure_data_dir()
-
+    """Create a new conversation file."""
     conversation = {
         "id": conversation_id,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now().isoformat(),
         "title": "New Conversation",
-        "messages": []
+        "messages": [],
+        "updated_at": datetime.now().isoformat(),
     }
-
-    # Save to file
-    path = get_conversation_path(conversation_id)
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
-
+    
+    filepath = get_conversation_filepath(conversation_id)
+    
+    with open(filepath, 'w') as f:
+        json.dump(conversation, f, indent=2, default=str)
+    
     return conversation
 
 
 def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Load a conversation from storage.
-
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        Conversation dict or None if not found
-    """
-    path = get_conversation_path(conversation_id)
-
-    if not os.path.exists(path):
+    """Get a conversation by ID."""
+    filepath = get_conversation_filepath(conversation_id)
+    
+    if not os.path.exists(filepath):
+        return None
+    
+    try:
+        with open(filepath, 'r') as f:
+            conversation = json.load(f)
+        
+        # Ensure all required fields exist
+        conversation.setdefault("messages", [])
+        conversation.setdefault("title", "New Conversation")
+        
+        return conversation
+    except Exception as e:
+        print(f"Error loading conversation {conversation_id}: {e}")
         return None
 
-    with open(path, 'r') as f:
-        return json.load(f)
 
-
-def save_conversation(conversation: Dict[str, Any]):
-    """
-    Save a conversation to storage.
-
-    Args:
-        conversation: Conversation dict to save
-    """
-    ensure_data_dir()
-
-    path = get_conversation_path(conversation['id'])
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
-
-
-def list_conversations() -> List[Dict[str, Any]]:
-    """
-    List all conversations (metadata only).
-
-    Returns:
-        List of conversation metadata dicts
-    """
-    ensure_data_dir()
-
-    conversations = []
-    for filename in os.listdir(DATA_DIR):
-        if filename.endswith('.json'):
-            path = os.path.join(DATA_DIR, filename)
-            with open(path, 'r') as f:
-                data = json.load(f)
-                # Return metadata only
-                conversations.append({
-                    "id": data["id"],
-                    "created_at": data["created_at"],
-                    "title": data.get("title", "New Conversation"),
-                    "message_count": len(data["messages"])
-                })
-
-    # Sort by creation time, newest first
-    conversations.sort(key=lambda x: x["created_at"], reverse=True)
-
-    return conversations
+def save_conversation(conversation_id: str, conversation: Dict[str, Any]):
+    """Save conversation to file."""
+    filepath = get_conversation_filepath(conversation_id)
+    
+    # Update timestamp
+    conversation["updated_at"] = datetime.now().isoformat()
+    
+    with open(filepath, 'w') as f:
+        json.dump(conversation, f, indent=2, default=str)
 
 
 def add_user_message(conversation_id: str, content: str):
-    """
-    Add a user message to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        content: User message content
-    """
+    """Add a user message to conversation."""
     conversation = get_conversation(conversation_id)
     if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
-
-    conversation["messages"].append({
+        return False
+    
+    message = {
         "role": "user",
-        "content": content
-    })
-
-    save_conversation(conversation)
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    conversation["messages"].append(message)
+    conversation["updated_at"] = datetime.now().isoformat()
+    
+    save_conversation(conversation_id, conversation)
+    return True
 
 
 def add_assistant_message(
     conversation_id: str,
-    stage1: List[Dict[str, Any]],
-    stage2: List[Dict[str, Any]],
-    stage3: Dict[str, Any]
+    stage1_results: List[Dict[str, Any]],
+    stage2_results: List[Dict[str, Any]],
+    stage3_result: Dict[str, Any]
 ):
-    """
-    Add an assistant message with all 3 stages to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        stage1: List of individual model responses
-        stage2: List of model rankings
-        stage3: Final synthesized response
-    """
+    """Add an assistant message to conversation."""
     conversation = get_conversation(conversation_id)
     if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
-
-    conversation["messages"].append({
+        return False
+    
+    message = {
         "role": "assistant",
-        "stage1": stage1,
-        "stage2": stage2,
-        "stage3": stage3
-    })
+        "stage1": stage1_results,
+        "stage2": stage2_results,
+        "stage3": stage3_result,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    conversation["messages"].append(message)
+    conversation["updated_at"] = datetime.now().isoformat()
+    
+    save_conversation(conversation_id, conversation)
+    return True
 
-    save_conversation(conversation)
 
-
-def update_conversation_title(conversation_id: str, title: str):
-    """
-    Update the title of a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        title: New title for the conversation
-    """
+def update_conversation_title(conversation_id: str, title: str) -> bool:
+    """Update conversation title."""
+    print(f"[DEBUG] update_conversation_title called: id={conversation_id}, title={title}")
+    
     conversation = get_conversation(conversation_id)
     if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
-
+        print(f"[DEBUG] Conversation {conversation_id} not found")
+        return False
+    
+    print(f"[DEBUG] Old title: {conversation.get('title')}")
     conversation["title"] = title
-    save_conversation(conversation)
+    conversation["updated_at"] = datetime.now().isoformat()
+    
+    save_conversation(conversation_id, conversation)
+    
+    # Verify save
+    saved_conv = get_conversation(conversation_id)
+    print(f"[DEBUG] Saved title: {saved_conv.get('title')}")
+    
+    return True
+
+
+def list_conversations() -> List[Dict[str, Any]]:
+    """List all conversations (metadata only)."""
+    ensure_data_dir()
+    
+    conversations = []
+    
+    for filename in os.listdir(DATA_DIR):
+        if filename.endswith('.json'):
+            filepath = os.path.join(DATA_DIR, filename)
+            try:
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                
+                conversation_id = data.get("id", filename.replace(".json", ""))
+                
+                conversations.append({
+                    "id": conversation_id,
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
+                    "title": data.get("title", "Untitled Conversation"),
+                    "message_count": len(data.get("messages", [])),
+                })
+            except Exception as e:
+                print(f"Error loading conversation file {filename}: {e}")
+    
+    # Sort by updated_at (most recent first)
+    conversations.sort(
+        key=lambda x: x.get("updated_at", ""), 
+        reverse=True
+    )
+    
+    return conversations
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """Delete a conversation."""
+    filepath = get_conversation_filepath(conversation_id)
+    
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+            return True
+        except Exception as e:
+            print(f"Error deleting conversation {conversation_id}: {e}")
+    
+    return False
+
+
+def get_conversation_stats() -> Dict[str, Any]:
+    """Get statistics about conversations."""
+    conversations = list_conversations()
+    
+    total_conversations = len(conversations)
+    total_messages = sum(conv["message_count"] for conv in conversations)
+    
+    return {
+        "total_conversations": total_conversations,
+        "total_messages": total_messages,
+        "average_messages_per_conversation": total_messages / total_conversations if total_conversations > 0 else 0,
+    }
