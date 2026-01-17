@@ -36,6 +36,48 @@
   border-color: #357abd;
 }
 
+.search-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 32px);
+  margin: 12px 16px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #666;
+  transition: all 0.2s;
+}
+
+.search-btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #333;
+}
+
+.search-btn svg {
+  flex-shrink: 0;
+  color: #999;
+}
+
+.search-btn span {
+  flex: 1;
+  text-align: left;
+}
+
+.search-btn kbd {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #666;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
@@ -49,30 +91,159 @@
   font-size: 14px;
 }
 
-.conversation-item {
-  padding: 12px;
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #666;
+  transition: background 0.2s, color 0.2s;
+}
+
+.sidebar-tab:hover {
+  background: #f0f0f0;
+}
+
+.sidebar-tab.active {
+  color: #4a90e2;
+  border-bottom: 2px solid #4a90e2;
+  margin-bottom: -1px;
+}
+
+.conversation-item-wrapper {
   margin-bottom: 4px;
+  border-radius: 6px;
+}
+
+.conversation-item-wrapper.active .conversation-item {
+  background: #e8f0fe;
+  border: 1px solid #4a90e2;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid transparent;
 }
 
 .conversation-item:hover {
   background: #f0f0f0;
 }
 
-.conversation-item.active {
-  background: #e8f0fe;
-  border: 1px solid #4a90e2;
+.conversation-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .conversation-title {
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.conversation-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  margin-left: 8px;
+}
+
+.conversation-item:hover .conversation-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #666;
+  transition: background 0.2s, color 0.2s;
+}
+
+.action-btn:hover {
+  background: #e0e0e0;
+}
+
+.action-btn.archive:hover {
+  color: #f59e0b;
+}
+
+.action-btn.unarchive:hover {
+  color: #10b981;
+}
+
+.action-btn.delete:hover {
+  color: #ef4444;
+}
+
+.delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff3f3;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+}
+
+.delete-confirm-text {
+  flex: 1;
+  font-size: 13px;
+  color: #dc2626;
+}
+
+.delete-confirm-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.delete-confirm-btn.yes {
+  background: #ef4444;
+  color: white;
+}
+
+.delete-confirm-btn.yes:hover {
+  background: #dc2626;
+}
+
+.delete-confirm-btn.no {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.delete-confirm-btn.no:hover {
+  background: #d1d5db;
 }

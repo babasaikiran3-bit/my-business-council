@@ -1,16 +1,65 @@
 .stage {
   margin: 24px 0;
-  padding: 20px;
   background: #fafafa;
   border-radius: 8px;
   border: 1px solid #e0e0e0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.stage.collapsed {
+  padding: 0;
+}
+
+.stage.expanded {
+  padding: 0;
+}
+
+.stage-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.stage-header:hover {
+  background: #f0f0f0;
 }
 
 .stage-title {
-  margin: 0 0 16px 0;
+  margin: 0;
   color: #333;
   font-size: 16px;
   font-weight: 600;
+}
+
+.stage-summary {
+  color: #888;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.expand-icon {
+  width: 20px;
+  height: 20px;
+  color: #666;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.stage-content {
+  padding: 0 20px 20px 20px;
 }
 
 .tabs {
@@ -50,12 +99,21 @@
   padding: 16px;
   border-radius: 6px;
   border: 1px solid #e0e0e0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tab-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 .model-name {
   color: #888;
   font-size: 12px;
-  margin-bottom: 12px;
   font-family: monospace;
 }
 

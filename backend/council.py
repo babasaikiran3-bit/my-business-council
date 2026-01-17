@@ -5,20 +5,56 @@ from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(
+    user_query: str,
+    conversation_history: List[Dict[str, Any]] = None,
+    on_model_complete: callable = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        conversation_history: Previous messages in the conversation (optional)
+        on_model_complete: Optional callback(model, response) for progress tracking
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    # Build messages with conversation history
+    messages = []
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Debug logging
+    print(f"\n=== STAGE 1 DEBUG ===")
+    print(f"Conversation history: {len(conversation_history) if conversation_history else 0} messages")
+
+    if conversation_history:
+        for i, msg in enumerate(conversation_history):
+            role = msg.get("role")
+            if role == "user":
+                content = msg.get("content", "")
+                messages.append({"role": "user", "content": content})
+                print(f"  [{i}] USER: {content[:80]}...")
+            elif role == "assistant" and msg.get("stage3"):
+                # Use the final council answer as assistant response
+                content = msg["stage3"].get("response", "")
+                messages.append({"role": "assistant", "content": content})
+                print(f"  [{i}] ASSISTANT: {content[:80]}...")
+            else:
+                print(f"  [{i}] SKIPPED: role={role}, has_stage3={bool(msg.get('stage3'))}")
+
+    # Add current user query
+    messages.append({"role": "user", "content": user_query})
+    print(f"  [NEW] USER: {user_query[:80]}...")
+    print(f"Total messages to send: {len(messages)}")
+    print("=== END DEBUG ===\n")
+
+    # Query all models in parallel with progress callback
+    responses = await query_models_parallel(
+        COUNCIL_MODELS,
+        messages,
+        on_model_complete=on_model_complete
+    )
 
     # Format results
     stage1_results = []
@@ -34,7 +70,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    on_model_complete: callable = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -94,8 +131,12 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Get rankings from all council models in parallel with progress callback
+    responses = await query_models_parallel(
+        COUNCIL_MODELS,
+        messages,
+        on_model_complete=on_model_complete
+    )
 
     # Format results
     stage2_results = []
@@ -293,18 +334,22 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    conversation_history: List[Dict[str, Any]] = None
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        conversation_history: Previous messages in the conversation (optional)
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, conversation_history)
 
     # If no models responded successfully, return error
     if not stage1_results:

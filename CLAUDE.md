@@ -36,26 +36,37 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
-- Each conversation: `{id, created_at, messages[]}`
-- Assistant messages contain: `{role, stage1, stage2, stage3}`
+- **Schema v2**: Tree-based message structure with parent pointers for editing/branching
+- Each conversation: `{id, created_at, schema_version, messages: {}, current_leaf_id, current_path}`
+- Messages stored as dict keyed by message ID, each with `parent_id` for tree traversal
+- Auto-migration: v1 (linear array) conversations automatically migrated to v2 on load
+- Key functions: `get_message_path()`, `get_siblings()`, `find_branch_leaf()`, `navigate_to_message()`
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
 - POST `/api/conversations/{id}/message` returns metadata in addition to stages
+- POST `/api/conversations/{id}/message/edit` - Edit a user message, creates new branch
+- POST `/api/conversations/{id}/navigate` - Navigate to a different branch
+- GET `/api/conversations/{id}/messages/{msg_id}/siblings` - Get sibling messages for version nav
 - Metadata includes: label_to_model mapping and aggregate_rankings
 
 ### Frontend Structure (`frontend/src/`)
 
 **`App.jsx`**
 - Main orchestration: manages conversations list and current conversation
-- Handles message sending and metadata storage
+- Handles message sending, editing, and navigation between branches
+- Converts tree-based messages to display array using `current_path`
+- Computes siblings info for version navigation
 - Important: metadata is stored in the UI state for display but not persisted to backend JSON
 
 **`components/ChatInterface.jsx`**
 - Multiline textarea (3 rows, resizable)
 - Enter to send, Shift+Enter for new line
 - User messages wrapped in markdown-content class for padding
+- **Message Editing**: Click edit icon on user messages to modify and regenerate response
+- **Version Navigation**: `< 1/3 >` style navigation between message versions (siblings)
+- Edit creates new branch, original branch preserved for navigation
 
 **`components/Stage1.jsx`**
 - Tab view of individual model responses
@@ -109,6 +120,14 @@ This strict format allows reliable parsing while still getting thoughtful evalua
 - Users can verify system's interpretation of model outputs
 - This builds trust and allows debugging of edge cases
 
+### Message Editing & Branching (ChatGPT-style)
+- Messages stored as tree with parent pointers, not linear array
+- Editing a message creates a sibling (same parent), preserving original branch
+- User can navigate between versions using `< 1/3 >` arrows
+- Conversation history sent to council follows current path, not full tree
+- Migration from v1 (array) to v2 (tree) happens automatically on load
+- See `docs/message-editing-design.md` for detailed design document
+
 ## Important Implementation Details
 
 ### Relative Imports
@@ -131,15 +150,22 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+5. **GitHub PR Editing**: `gh pr edit` may fail with "Projects (classic) deprecated" error. Use REST API instead:
+   ```bash
+   # Update PR title and body
+   gh api repos/karpathy/llm-council/pulls/PR_NUMBER -X PATCH \
+     -f title="new title" \
+     -f body="$(cat /tmp/pr-body.md)"
+   ```
 
 ## Future Enhancement Ideas
 
 - Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
-- Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
 - Support for reasoning models (o1, etc.) with special handling
+- Branch naming and comparison (side-by-side view of different branches)
+- Delete branch capability
 
 ## Testing Notes
 
