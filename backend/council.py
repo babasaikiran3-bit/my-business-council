@@ -1,20 +1,12 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
+from .router import query_models_parallel, query_model
+import re
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
-    """
-    Stage 1: Collect individual responses from all council models.
-
-    Args:
-        user_query: The user's question
-
-    Returns:
-        List of dicts with 'model' and 'response' keys
-    """
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
@@ -36,16 +28,6 @@ async def stage2_collect_rankings(
     user_query: str,
     stage1_results: List[Dict[str, Any]]
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Stage 2: Each model ranks the anonymized responses.
-
-    Args:
-        user_query: The original user query
-        stage1_results: Results from Stage 1
-
-    Returns:
-        Tuple of (rankings list, label_to_model mapping)
-    """
     # Create anonymized labels for responses (Response A, Response B, etc.)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
@@ -61,7 +43,11 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     ])
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+    ranking_prompt = f"""You are an expert software engineer.
+    You write correct, efficient, and idiomatic code.
+    Prefer clarity over cleverness.
+    Do not include explanations unless asked.
+    You are evaluating different responses to the following question:
 
 Question: {user_query}
 
@@ -117,17 +103,6 @@ async def stage3_synthesize_final(
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
-    """
-    Stage 3: Chairman synthesizes final response.
-
-    Args:
-        user_query: The original user query
-        stage1_results: Individual model responses from Stage 1
-        stage2_results: Rankings from Stage 2
-
-    Returns:
-        Dict with 'model' and 'response' keys
-    """
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
@@ -139,7 +114,7 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    chairman_prompt = f"""You are the Chairman of an LLM Council of Expert Software Engineer. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
 
 Original Question: {user_query}
 
@@ -164,27 +139,17 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": CHAIRMAN_MODEL["model"],
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": CHAIRMAN_MODEL["model"],
         "response": response.get('content', '')
     }
 
 
 def parse_ranking_from_text(ranking_text: str) -> List[str]:
-    """
-    Parse the FINAL RANKING section from the model's response.
-
-    Args:
-        ranking_text: The full text response from the model
-
-    Returns:
-        List of response labels in ranked order
-    """
-    import re
 
     # Look for "FINAL RANKING:" section
     if "FINAL RANKING:" in ranking_text:
@@ -212,16 +177,7 @@ def calculate_aggregate_rankings(
     stage2_results: List[Dict[str, Any]],
     label_to_model: Dict[str, str]
 ) -> List[Dict[str, Any]]:
-    """
-    Calculate aggregate rankings across all models.
 
-    Args:
-        stage2_results: Rankings from each model
-        label_to_model: Mapping from anonymous labels to model names
-
-    Returns:
-        List of dicts with model name and average rank, sorted best to worst
-    """
     from collections import defaultdict
 
     # Track positions for each model
@@ -275,7 +231,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    response = await query_model(CHAIRMAN_MODEL["model"], messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title
@@ -294,15 +250,6 @@ Title:"""
 
 
 async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
-    """
-    Run the complete 3-stage council process.
-
-    Args:
-        user_query: The user's question
-
-    Returns:
-        Tuple of (stage1_results, stage2_results, stage3_result, metadata)
-    """
     # Stage 1: Collect individual responses
     stage1_results = await stage1_collect_responses(user_query)
 

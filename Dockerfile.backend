@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+# System deps
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# Copy only dependency files first (better caching)
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen
+
+# Copy backend code
+COPY backend ./backend
+
+EXPOSE 8000
+
+CMD ["uv", "run", "python", "-m", "backend.main"]
