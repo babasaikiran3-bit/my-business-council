@@ -57,6 +57,16 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleUploadFile = async (file) => {
+    if (!currentConversationId) return;
+    return await api.uploadFile(currentConversationId, file);
+  };
+
+  const handleDeleteFile = async (filename) => {
+    if (!currentConversationId) return;
+    return await api.deleteFile(currentConversationId, filename);
+  };
+
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 
@@ -78,7 +88,6 @@ function App() {
         metadata: null,
         loading: {
           stage1: false,
-          stage2: false,
           stage3: false,
         },
       };
@@ -111,25 +120,6 @@ function App() {
             });
             break;
 
-          case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
-            break;
 
           case 'stage3_start':
             setCurrentConversation((prev) => {
@@ -140,10 +130,31 @@ function App() {
             });
             break;
 
+          case 'stage3_chunk':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+
+              // Init stage3 if null (it should have been init by stage3_start but let's be safe)
+              const currentModel = lastMsg.stage3?.model || 'chairman';
+              const currentResponse = lastMsg.stage3?.response || '';
+
+              lastMsg.stage3 = {
+                model: currentModel,
+                response: currentResponse + event.chunk
+              };
+
+              // Keep loading true
+              lastMsg.loading.stage3 = true;
+              return { ...prev, messages };
+            });
+            break;
+
           case 'stage3_complete':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
+              // Ensure we have the final full response or use what we have
               lastMsg.stage3 = event.data;
               lastMsg.loading.stage3 = false;
               return { ...prev, messages };
@@ -192,6 +203,8 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
+        onUploadFile={handleUploadFile}
+        onDeleteFile={handleDeleteFile}
         isLoading={isLoading}
       />
     </div>

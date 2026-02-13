@@ -1,172 +1,192 @@
-"""JSON-based storage for conversations."""
+"""Database-based storage for conversations."""
 
 import json
-import os
-from datetime import datetime
+import logging
 from typing import List, Dict, Any, Optional
-from pathlib import Path
-from .config import DATA_DIR
+from datetime import datetime
+from sqlalchemy import select, desc
 
+from .database import AsyncSessionLocal, ConversationModel, MessageModel, init_db
 
-def ensure_data_dir():
-    """Ensure the data directory exists."""
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+logger = logging.getLogger(__name__)
 
+async def initialize_storage():
+    """Initialize the storage system (database)."""
+    await init_db()
 
-def get_conversation_path(conversation_id: str) -> str:
-    """Get the file path for a conversation."""
-    return os.path.join(DATA_DIR, f"{conversation_id}.json")
-
-
-def create_conversation(conversation_id: str) -> Dict[str, Any]:
+async def create_conversation(conversation_id: str) -> Dict[str, Any]:
     """
     Create a new conversation.
-
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        New conversation dict
     """
-    ensure_data_dir()
+    async with AsyncSessionLocal() as session:
+        new_conv = ConversationModel(
+            id=conversation_id,
+            title="New Conversation",
+            created_at=datetime.utcnow()
+        )
+        session.add(new_conv)
+        await session.commit()
+        
+        return {
+            "id": new_conv.id,
+            "created_at": new_conv.created_at.isoformat(),
+            "title": new_conv.title,
+            "messages": []
+        }
 
-    conversation = {
-        "id": conversation_id,
-        "created_at": datetime.utcnow().isoformat(),
-        "title": "New Conversation",
-        "messages": []
-    }
-
-    # Save to file
-    path = get_conversation_path(conversation_id)
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
-
-    return conversation
-
-
-def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
+async def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """
     Load a conversation from storage.
-
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        Conversation dict or None if not found
     """
-    path = get_conversation_path(conversation_id)
+    async with AsyncSessionLocal() as session:
+        # Get conversation
+        result = await session.execute(
+            select(ConversationModel).where(ConversationModel.id == conversation_id)
+        )
+        conv = result.scalar_one_or_none()
+        
+        if not conv:
+            return None
+            
+        # Get messages
+        result = await session.execute(
+            select(MessageModel)
+            .where(MessageModel.conversation_id == conversation_id)
+            .order_by(MessageModel.created_at)
+        )
+        messages = result.scalars().all()
+        
+        # Format messages
+        formatted_messages = []
+        for msg in messages:
+            if msg.role == "user":
+                formatted_messages.append({
+                    "role": "user",
+                    "content": msg.content
+                })
+            elif msg.role == "assistant":
+                # Reconstruct the complex assistant object
+                formatted_messages.append({
+                    "role": "assistant",
+                    "stage1": msg.stage1_results,
+                    "stage2": msg.stage2_results,
+                    "stage3": msg.stage3_result,
+                    "metadata": msg.metadata_json
+                })
+                
+        return {
+            "id": conv.id,
+            "created_at": conv.created_at.isoformat(),
+            "title": conv.title,
+            "messages": formatted_messages
+        }
 
-    if not os.path.exists(path):
-        return None
-
-    with open(path, 'r') as f:
-        return json.load(f)
-
-
-def save_conversation(conversation: Dict[str, Any]):
+async def get_chat_history(conversation_id: str) -> List[Dict[str, str]]:
     """
-    Save a conversation to storage.
-
-    Args:
-        conversation: Conversation dict to save
+    Get simplified chat history for LLM context.
+    Returns list of {'role': 'user'|'assistant', 'content': '...'}
     """
-    ensure_data_dir()
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(MessageModel)
+            .where(MessageModel.conversation_id == conversation_id)
+            .order_by(MessageModel.created_at)
+        )
+        messages = result.scalars().all()
+        
+        history = []
+        for msg in messages:
+            # For assistant messages, we use the stored 'content' (which is the final response)
+            # This is much simpler than reconstructing from the complex JSON structure
+            if msg.content:
+                history.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+                
+        return history
 
-    path = get_conversation_path(conversation['id'])
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
-
-
-def list_conversations() -> List[Dict[str, Any]]:
+async def list_conversations() -> List[Dict[str, Any]]:
     """
     List all conversations (metadata only).
-
-    Returns:
-        List of conversation metadata dicts
     """
-    ensure_data_dir()
+    async with AsyncSessionLocal() as session:
+        # Get all conversations sorted by date
+        result = await session.execute(
+            select(ConversationModel).order_by(desc(ConversationModel.created_at))
+        )
+        conversations = result.scalars().all()
+        
+        # For message counts, we would ideally do a join or subquery, 
+        # but for simplicity effectively doing N+1 or just not showing count requires thought.
+        # Let's do a simple count query for each or just skip message count for MVP speed.
+        # To match previous API, we need message_count.
+        
+        # Let's fetch all conversations
+        output = []
+        for conv in conversations:
+            # Count messages
+            msg_count_res = await session.execute(
+                select(MessageModel).where(MessageModel.conversation_id == conv.id)
+            )
+            count = len(msg_count_res.scalars().all())
+            
+            output.append({
+                "id": conv.id,
+                "created_at": conv.created_at.isoformat(),
+                "title": conv.title,
+                "message_count": count
+            })
+            
+        return output
 
-    conversations = []
-    for filename in os.listdir(DATA_DIR):
-        if filename.endswith('.json'):
-            path = os.path.join(DATA_DIR, filename)
-            with open(path, 'r') as f:
-                data = json.load(f)
-                # Return metadata only
-                conversations.append({
-                    "id": data["id"],
-                    "created_at": data["created_at"],
-                    "title": data.get("title", "New Conversation"),
-                    "message_count": len(data["messages"])
-                })
-
-    # Sort by creation time, newest first
-    conversations.sort(key=lambda x: x["created_at"], reverse=True)
-
-    return conversations
-
-
-def add_user_message(conversation_id: str, content: str):
+async def add_user_message(conversation_id: str, content: str):
     """
     Add a user message to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        content: User message content
     """
-    conversation = get_conversation(conversation_id)
-    if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
+    async with AsyncSessionLocal() as session:
+        msg = MessageModel(
+            conversation_id=conversation_id,
+            role="user",
+            content=content,
+            created_at=datetime.utcnow()
+        )
+        session.add(msg)
+        await session.commit()
 
-    conversation["messages"].append({
-        "role": "user",
-        "content": content
-    })
-
-    save_conversation(conversation)
-
-
-def add_assistant_message(
+async def add_assistant_message(
     conversation_id: str,
     stage1: List[Dict[str, Any]],
     stage2: List[Dict[str, Any]],
-    stage3: Dict[str, Any]
+    stage3: Dict[str, Any],
+    metadata: Dict[str, Any] = None
 ):
     """
-    Add an assistant message with all 3 stages to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        stage1: List of individual model responses
-        stage2: List of model rankings
-        stage3: Final synthesized response
+    Add an assistant message with all 3 stages.
     """
-    conversation = get_conversation(conversation_id)
-    if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
+    async with AsyncSessionLocal() as session:
+        msg = MessageModel(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=stage3.get("response", ""), # Store final response as content for easy access
+            stage1_results=stage1,
+            stage2_results=stage2,
+            stage3_result=stage3,
+            metadata_json=metadata,
+            created_at=datetime.utcnow()
+        )
+        session.add(msg)
+        await session.commit()
 
-    conversation["messages"].append({
-        "role": "assistant",
-        "stage1": stage1,
-        "stage2": stage2,
-        "stage3": stage3
-    })
-
-    save_conversation(conversation)
-
-
-def update_conversation_title(conversation_id: str, title: str):
+async def update_conversation_title(conversation_id: str, title: str):
     """
     Update the title of a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        title: New title for the conversation
     """
-    conversation = get_conversation(conversation_id)
-    if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
-
-    conversation["title"] = title
-    save_conversation(conversation)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ConversationModel).where(ConversationModel.id == conversation_id)
+        )
+        conv = result.scalar_one_or_none()
+        if conv:
+            conv.title = title
+            await session.commit()

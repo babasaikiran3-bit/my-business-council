@@ -57,6 +57,21 @@ COUNCIL_MODELS = [
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
 
+### 4. Configure Database (Optional)
+
+By default, the application uses a local SQLite database (`data/conversations/council.db`). No configuration is needed for this.
+
+To use an external database (e.g., PostgreSQL):
+
+1. Add your connection string to `.env`:
+   ```bash
+   DATABASE_URL=postgresql+asyncpg://user:password@localhost/dbname
+   ```
+2. Install the necessary driver (e.g., for PostgreSQL):
+   ```bash
+   uv add asyncpg greenlet
+   ```
+
 ## Running the Application
 
 **Option 1: Use the start script**
@@ -81,7 +96,7 @@ Then open http://localhost:5173 in your browser.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
+- **Backend:** FastAPI (Python 3.10+), SQLAlchemy (Async), OpenRouter API
 - **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
+- **Storage:** SQLite (default) or PostgreSQL (supported via SQLAlchemy)
 - **Package Management:** uv for Python, npm for JavaScript

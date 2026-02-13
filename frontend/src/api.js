@@ -112,4 +112,42 @@ export const api = {
       }
     }
   },
+
+
+  /**
+   * Upload a file for RAG context.
+   */
+  async uploadFile(conversationId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/upload`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to upload file');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a file from RAG context.
+   */
+  async deleteFile(conversationId, filename) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/files/${filename}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to delete file');
+    }
+    return response.json();
+  },
 };
