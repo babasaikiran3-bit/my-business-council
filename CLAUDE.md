@@ -11,16 +11,24 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `COUNCIL_MODELS` (list of model identifiers in litellm format)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Contains `UTILITY_MODEL` (fast/cheap model for lightweight tasks like title generation)
+- Multi-provider support: reads API keys from `.env` for each provider
+- Intelligent routing via `resolve_model()`: uses direct API if key exists, falls back to OpenRouter
+- `PROVIDER_KEY_MAP`: maps litellm provider prefix to env var name
+- `LITELLM_TO_OPENROUTER_PROVIDER`: maps litellm provider prefix to OpenRouter prefix (where they differ)
+- `print_routing_info()`: prints provider routing table at startup
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
-**`openrouter.py`**
-- `query_model()`: Single async model query
+**`llm_client.py`** (replaces old `openrouter.py`)
+- `query_model()`: Single async model query via LiteLLM (routes to appropriate provider)
 - `query_models_parallel()`: Parallel queries using `asyncio.gather()`
 - Returns dict with 'content' and optional 'reasoning_details'
 - Graceful degradation: returns None on failure, continues with successful responses
+- Uses `litellm.acompletion()` for unified async access to all providers
+
+**`openrouter.py`** (DEPRECATED - kept for reference, no longer imported)
 
 **`council.py`** - The Core Logic
 - `stage1_collect_responses()`: Parallel queries to all council models
@@ -122,8 +130,13 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 ### Markdown Rendering
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
 
-### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+### Multi-Provider Support (LiteLLM)
+- Models are configured in `backend/config.py` using litellm naming: `provider/model-name`
+- Supported providers: OpenAI, Anthropic, Google Gemini, xAI, DeepSeek (easily extensible)
+- Set API keys in `.env` (see `.env.example`); you can mix direct keys and OpenRouter
+- At startup, the server prints a routing table showing which provider each model uses
+- To add a new provider: add to `PROVIDER_KEY_MAP` in config.py, and optionally to `LITELLM_TO_OPENROUTER_PROVIDER` if the litellm prefix differs from the OpenRouter prefix
+- Chairman can be same or different from council members. The current default is Gemini as chairman per user preference
 
 ## Common Gotchas
 
@@ -140,10 +153,15 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
 - Support for reasoning models (o1, etc.) with special handling
+- UI for managing API keys and provider configuration
 
 ## Testing Notes
 
 Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+
+### Provider Key Precedence
+1. Direct provider key (e.g. `OPENAI_API_KEY`) — lowest latency, cheapest
+2. OpenRouter (`OPENROUTER_API_KEY`) — universal fallback, works with any model
 
 ## Data Flow Summary
 
