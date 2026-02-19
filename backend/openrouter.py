@@ -1,8 +1,14 @@
 """OpenRouter API client for making LLM requests."""
 
-import httpx
+import asyncio
+import logging
 from typing import List, Dict, Any, Optional
+
+import httpx
+
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+
+logger = logging.getLogger(__name__)
 
 
 async def query_model(
@@ -48,8 +54,25 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
-    except Exception as e:
-        print(f"Error querying model {model}: {e}")
+    except httpx.TimeoutException:
+        logger.error("Timeout querying model %s (%.0fs limit)", model, timeout)
+        return None
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status == 401:
+            logger.error("Authentication failed for model %s (401)", model)
+        elif status == 429:
+            logger.warning("Rate limited for model %s (429)", model)
+        elif status >= 500:
+            logger.error("Server error from OpenRouter for model %s (%d)", model, status)
+        else:
+            logger.error("HTTP error for model %s: %d", model, status)
+        return None
+    except (KeyError, IndexError) as e:
+        logger.error("Unexpected response structure from model %s: %s", model, e)
+        return None
+    except Exception:
+        logger.exception("Unexpected error querying model %s", model)
         return None
 
 
@@ -67,8 +90,6 @@ async def query_models_parallel(
     Returns:
         Dict mapping model identifier to response dict (or None if failed)
     """
-    import asyncio
-
     # Create tasks for all models
     tasks = [query_model(model, messages) for model in models]
 

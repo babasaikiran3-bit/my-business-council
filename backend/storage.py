@@ -1,11 +1,18 @@
 """JSON-based storage for conversations."""
 
+import fcntl
 import json
+import logging
 import os
+import tempfile
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from uuid import UUID
+
 from .config import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_data_dir():
@@ -13,9 +20,19 @@ def ensure_data_dir():
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 
+def _validate_conversation_id(conversation_id: str) -> str:
+    """Validate that conversation_id is a valid UUID to prevent path traversal."""
+    try:
+        validated = UUID(conversation_id)
+        return str(validated)
+    except (ValueError, AttributeError):
+        raise ValueError(f"Invalid conversation ID: must be a valid UUID")
+
+
 def get_conversation_path(conversation_id: str) -> str:
     """Get the file path for a conversation."""
-    return os.path.join(DATA_DIR, f"{conversation_id}.json")
+    safe_id = _validate_conversation_id(conversation_id)
+    return os.path.join(DATA_DIR, f"{safe_id}.json")
 
 
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
@@ -37,10 +54,8 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "messages": []
     }
 
-    # Save to file
-    path = get_conversation_path(conversation_id)
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
+    # Save to file (atomic write)
+    save_conversation(conversation)
 
     return conversation
 
@@ -61,12 +76,16 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     with open(path, 'r') as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
         return json.load(f)
 
 
 def save_conversation(conversation: Dict[str, Any]):
     """
-    Save a conversation to storage.
+    Save a conversation to storage using atomic writes.
+
+    Writes to a temporary file first, then atomically renames to prevent
+    data corruption on crash. Uses file locking for concurrent access safety.
 
     Args:
         conversation: Conversation dict to save
@@ -74,8 +93,24 @@ def save_conversation(conversation: Dict[str, Any]):
     ensure_data_dir()
 
     path = get_conversation_path(conversation['id'])
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
+
+    # Write to a temp file in the same directory, then atomically replace.
+    # os.replace() is atomic on POSIX systems.
+    fd, tmp_path = tempfile.mkstemp(dir=DATA_DIR, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(conversation, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        # Clean up the temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def list_conversations() -> List[Dict[str, Any]]:

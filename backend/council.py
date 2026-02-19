@@ -1,8 +1,15 @@
 """3-stage LLM Council orchestration."""
 
+import logging
+import random
+import re
+from collections import defaultdict
 from typing import List, Dict, Any, Tuple
+
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+
+logger = logging.getLogger(__name__)
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -46,19 +53,28 @@ async def stage2_collect_rankings(
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
-    # Create anonymized labels for responses (Response A, Response B, etc.)
+    # Create randomized anonymized labels to eliminate position bias
+    # (Research shows first-position bias in LLM evaluation)
+    indices = list(range(len(stage1_results)))
+    random.shuffle(indices)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
-    # Create mapping from label to model name
+    # Create mapping from label to model name (randomized assignment)
     label_to_model = {
-        f"Response {label}": result['model']
-        for label, result in zip(labels, stage1_results)
+        f"Response {label}": stage1_results[idx]['model']
+        for label, idx in zip(labels, indices)
     }
 
-    # Build the ranking prompt
+    # Build label-to-result mapping for building the prompt
+    label_to_result = {
+        f"Response {label}": stage1_results[idx]
+        for label, idx in zip(labels, indices)
+    }
+
+    # Build the ranking prompt using randomized label assignments
     responses_text = "\n\n".join([
-        f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
+        f"Response {label}:\n{label_to_result[f'Response {label}']['response']}"
+        for label in labels
     ])
 
     ranking_prompt = f"""You are evaluating different responses to the following question:
@@ -98,11 +114,12 @@ Now provide your evaluation and ranking:"""
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
+    num_responses = len(stage1_results)
     stage2_results = []
     for model, response in responses.items():
         if response is not None:
             full_text = response.get('content', '')
-            parsed = parse_ranking_from_text(full_text)
+            parsed = parse_ranking_from_text(full_text, expected_count=num_responses)
             stage2_results.append({
                 "model": model,
                 "ranking": full_text,
@@ -134,9 +151,10 @@ async def stage3_synthesize_final(
         for result in stage1_results
     ])
 
+    # Use anonymous labels for evaluators to prevent chairman bias
     stage2_text = "\n\n".join([
-        f"Model: {result['model']}\nRanking: {result['ranking']}"
-        for result in stage2_results
+        f"Evaluator {i+1}:\n{result['ranking']}"
+        for i, result in enumerate(stage2_results)
     ])
 
     chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
@@ -174,38 +192,71 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     }
 
 
-def parse_ranking_from_text(ranking_text: str) -> List[str]:
+def parse_ranking_from_text(ranking_text: str, expected_count: int = 0) -> List[str]:
     """
     Parse the FINAL RANKING section from the model's response.
 
     Args:
         ranking_text: The full text response from the model
+        expected_count: Expected number of responses (for validation). 0 to skip.
 
     Returns:
-        List of response labels in ranked order
+        List of unique response labels in ranked order
     """
-    import re
+    ranking_section = None
 
-    # Look for "FINAL RANKING:" section
-    if "FINAL RANKING:" in ranking_text:
-        # Extract everything after "FINAL RANKING:"
-        parts = ranking_text.split("FINAL RANKING:")
-        if len(parts) >= 2:
-            ranking_section = parts[1]
-            # Try to extract numbered list format (e.g., "1. Response A")
-            # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
-            if numbered_matches:
-                # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
+    # Case-insensitive search for "FINAL RANKING:" section
+    lower_text = ranking_text.lower()
+    marker = "final ranking:"
+    marker_pos = lower_text.rfind(marker)  # Use rfind to get the last occurrence
 
-            # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
-            return matches
+    if marker_pos != -1:
+        ranking_section = ranking_text[marker_pos + len(marker):]
 
-    # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
-    return matches
+    if ranking_section:
+        # Try numbered list format: "1. Response A"
+        numbered_matches = re.findall(r'\d+\.\s*Response ([A-Z])', ranking_section)
+        if numbered_matches:
+            labels = [f"Response {letter}" for letter in numbered_matches]
+            labels = _deduplicate_preserve_order(labels)
+            if expected_count and len(labels) != expected_count:
+                logger.warning(
+                    "Parsed %d rankings but expected %d from numbered format",
+                    len(labels), expected_count
+                )
+            return labels
+
+        # Fallback: extract "Response X" patterns from ranking section only
+        matches = re.findall(r'Response ([A-Z])', ranking_section)
+        if matches:
+            labels = [f"Response {letter}" for letter in matches]
+            labels = _deduplicate_preserve_order(labels)
+            logger.info("Used fallback regex parsing for ranking section")
+            return labels
+
+    # Final fallback: search the entire text (least reliable)
+    matches = re.findall(r'Response ([A-Z])', ranking_text)
+    if matches:
+        labels = [f"Response {letter}" for letter in matches]
+        labels = _deduplicate_preserve_order(labels)
+        logger.warning(
+            "No 'FINAL RANKING:' marker found, fell back to full-text parsing"
+        )
+        return labels
+
+    logger.warning("Could not parse any rankings from text")
+    return []
+
+
+def _deduplicate_preserve_order(items: List[str]) -> List[str]:
+    """Remove duplicates from a list while preserving order."""
+    seen = set()
+    result = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def calculate_aggregate_rankings(
@@ -215,23 +266,21 @@ def calculate_aggregate_rankings(
     """
     Calculate aggregate rankings across all models.
 
+    Uses the already-parsed rankings from stage2_results rather than
+    re-parsing from raw text.
+
     Args:
-        stage2_results: Rankings from each model
+        stage2_results: Rankings from each model (with 'parsed_ranking' field)
         label_to_model: Mapping from anonymous labels to model names
 
     Returns:
         List of dicts with model name and average rank, sorted best to worst
     """
-    from collections import defaultdict
-
     # Track positions for each model
     model_positions = defaultdict(list)
 
     for ranking in stage2_results:
-        ranking_text = ranking['ranking']
-
-        # Parse the ranking from the structured format
-        parsed_ranking = parse_ranking_from_text(ranking_text)
+        parsed_ranking = ranking.get('parsed_ranking', [])
 
         for position, label in enumerate(parsed_ranking, start=1):
             if label in label_to_model:
