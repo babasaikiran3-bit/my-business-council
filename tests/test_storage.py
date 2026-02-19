@@ -114,3 +114,93 @@ class TestStorageOperations:
     def test_invalid_id_in_get_raises(self, tmp_data_dir):
         with pytest.raises(ValueError):
             get_conversation("../../../etc/passwd")
+
+    def test_add_user_message(self, tmp_data_dir):
+        from backend.storage import add_user_message
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+
+        add_user_message(conv_id, "Hello!")
+
+        conv = get_conversation(conv_id)
+        assert len(conv["messages"]) == 1
+        assert conv["messages"][0]["role"] == "user"
+        assert conv["messages"][0]["content"] == "Hello!"
+
+    def test_add_assistant_message(self, tmp_data_dir):
+        from backend.storage import add_assistant_message
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+
+        stage1 = [{"model": "m1", "response": "answer"}]
+        stage2 = [{"model": "m1", "ranking": "...", "parsed_ranking": []}]
+        stage3 = {"model": "chairman", "response": "synthesis"}
+        add_assistant_message(conv_id, stage1, stage2, stage3)
+
+        conv = get_conversation(conv_id)
+        assert len(conv["messages"]) == 1
+        msg = conv["messages"][0]
+        assert msg["role"] == "assistant"
+        assert msg["stage1"] == stage1
+        assert msg["stage2"] == stage2
+        assert msg["stage3"] == stage3
+
+    def test_update_conversation_title(self, tmp_data_dir):
+        from backend.storage import update_conversation_title
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+
+        update_conversation_title(conv_id, "New Title")
+
+        conv = get_conversation(conv_id)
+        assert conv["title"] == "New Title"
+
+    def test_add_message_to_nonexistent_raises(self, tmp_data_dir):
+        from backend.storage import add_user_message
+        with pytest.raises(ValueError, match="not found"):
+            add_user_message("550e8400-e29b-41d4-a716-446655440099", "Hello")
+
+    def test_update_title_nonexistent_raises(self, tmp_data_dir):
+        from backend.storage import update_conversation_title
+        with pytest.raises(ValueError, match="not found"):
+            update_conversation_title("550e8400-e29b-41d4-a716-446655440099", "Title")
+
+    def test_multiple_messages_accumulate(self, tmp_data_dir):
+        from backend.storage import add_user_message, add_assistant_message
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+
+        add_user_message(conv_id, "First question")
+        add_assistant_message(conv_id, [], [], {"model": "m", "response": "r"})
+        add_user_message(conv_id, "Second question")
+
+        conv = get_conversation(conv_id)
+        assert len(conv["messages"]) == 3
+        assert conv["messages"][0]["role"] == "user"
+        assert conv["messages"][1]["role"] == "assistant"
+        assert conv["messages"][2]["role"] == "user"
+
+    def test_list_conversations_returns_correct_message_count(self, tmp_data_dir):
+        from backend.storage import add_user_message
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+        add_user_message(conv_id, "Hello")
+        add_user_message(conv_id, "World")
+
+        convs = list_conversations()
+        assert convs[0]["message_count"] == 2
+
+    def test_save_preserves_data_integrity(self, tmp_data_dir):
+        """Data written and read back should be identical."""
+        conv_id = "550e8400-e29b-41d4-a716-446655440000"
+        create_conversation(conv_id)
+
+        conv = get_conversation(conv_id)
+        conv["messages"].append({
+            "role": "user",
+            "content": "Special chars: <>&'\"\n\ttab"
+        })
+        save_conversation(conv)
+
+        loaded = get_conversation(conv_id)
+        assert loaded["messages"][0]["content"] == "Special chars: <>&'\"\n\ttab"
