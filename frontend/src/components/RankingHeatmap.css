@@ -1,0 +1,127 @@
+.ranking-heatmap {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.ranking-heatmap h4 {
+  margin: 0 0 6px 0;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.heatmap-description {
+  margin: 0 0 14px 0;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.heatmap-table-wrapper {
+  overflow-x: auto;
+}
+
+.heatmap-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.heatmap-corner {
+  background: #f0f0f0;
+  color: #888;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.heatmap-col-header {
+  background: #f0f0f0;
+  color: #444;
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.heatmap-row-header {
+  background: #f0f0f0;
+  color: #444;
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  white-space: nowrap;
+}
+
+.heatmap-cell {
+  text-align: center;
+  padding: 8px 14px;
+  border: 1px solid #ddd;
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 60px;
+}
+
+/* 1st place — green */
+.heatmap-pos-1 {
+  background: #d4edda;
+  color: #155724;
+}
+
+/* 2nd place — yellow */
+.heatmap-pos-2 {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* 3rd place — red-ish */
+.heatmap-pos-3 {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* 4th+ place — deeper red */
+.heatmap-pos-4,
+.heatmap-pos-5 {
+  background: #f1aeb5;
+  color: #58151c;
+}
+
+/* Self-ranking cell */
+.heatmap-self {
+  background: #ececec;
+  color: #aaa;
+}
+
+/* Missing data */
+.heatmap-unknown {
+  background: #fafafa;
+  color: #ccc;
+}
+
+/* Average rank row */
+.heatmap-avg-row {
+  border-top: 2px solid #bbb;
+}
+
+.heatmap-avg-row .heatmap-row-header {
+  font-style: italic;
+  color: #555;
+}
+
+.heatmap-avg {
+  background: #eef4ff;
+  color: #2a7ae2;
+  font-family: monospace;
+}
