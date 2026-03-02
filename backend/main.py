@@ -11,6 +11,8 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .providers import validate_providers
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL, get_model_name
 
 app = FastAPI(title="LLM Council API")
 
@@ -48,6 +50,22 @@ class Conversation(BaseModel):
     created_at: str
     title: str
     messages: List[Dict[str, Any]]
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log provider availability on startup."""
+    all_configs = COUNCIL_MODELS + [CHAIRMAN_MODEL, TITLE_MODEL]
+    status = validate_providers(all_configs)
+    print("--- LLM Council Provider Status ---")
+    for provider, state in sorted(status.items()):
+        print(f"  {provider}: {state}")
+    print("--- Council Models ---")
+    for cfg in COUNCIL_MODELS:
+        print(f"  {get_model_name(cfg)} ({cfg['provider']})")
+    print(f"  Chairman: {get_model_name(CHAIRMAN_MODEL)} ({CHAIRMAN_MODEL['provider']})")
+    print(f"  Title: {get_model_name(TITLE_MODEL)} ({TITLE_MODEL['provider']})")
+    print("---")
 
 
 @app.get("/")

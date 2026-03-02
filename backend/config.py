@@ -5,22 +5,39 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# OpenRouter API key
+# API keys
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+CURSOR_API_KEY = os.getenv("CURSOR_API_KEY")
 
-# Council members - list of OpenRouter model identifiers
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-# Chairman model - synthesizes final response
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+# AWS credentials
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Council members - list of model config dicts
+COUNCIL_MODELS = [
+    {"provider": "openrouter", "model": "openai/gpt-5.1"},
+    {"provider": "openrouter", "model": "google/gemini-3-pro-preview"},
+    {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+    {"provider": "openrouter", "model": "x-ai/grok-4"},
+]
+
+# Chairman model - synthesizes final response
+CHAIRMAN_MODEL = {"provider": "openrouter", "model": "google/gemini-3-pro-preview"}
+
+# Title generation model (fast and cheap)
+TITLE_MODEL = {"provider": "openrouter", "model": "google/gemini-2.5-flash"}
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
+
+
+def get_model_name(model_config) -> str:
+    """Get display name for a model config. Uses 'name' override if present, else 'model'."""
+    if isinstance(model_config, str):
+        return model_config
+    return model_config.get("name", model_config["model"])
