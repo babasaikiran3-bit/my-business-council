@@ -22,9 +22,13 @@ BACKEND_PID=$!
 # Wait a bit for backend to start
 sleep 2
 
-# Start frontend
+# Start frontend (install deps if needed)
 echo "Starting frontend on http://localhost:$FRONTEND_PORT..."
 cd frontend
+if [ ! -d node_modules ]; then
+    echo "Installing frontend dependencies..."
+    npm install
+fi
 VITE_BACKEND_PORT=$BACKEND_PORT npx vite --port $FRONTEND_PORT &
 FRONTEND_PID=$!
 cd ..
