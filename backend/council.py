@@ -274,7 +274,7 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    response = await query_model(TITLE_MODEL, messages, timeout=30.0)
+    response = await query_model(TITLE_MODEL, messages, timeout=60.0)
 
     if response is None:
         # Fallback to a generic title

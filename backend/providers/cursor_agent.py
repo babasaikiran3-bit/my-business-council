@@ -10,7 +10,7 @@ from ..config import CURSOR_API_KEY
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
-    timeout: float = 120.0
+    timeout: float = 180.0
 ) -> Optional[Dict[str, Any]]:
     """
     Query a model via cursor-agent CLI.
@@ -74,9 +74,12 @@ async def query_model(
         }
 
     except asyncio.TimeoutError:
-        print(f"Timeout querying cursor-agent model {model}")
+        print(f"Timeout querying cursor-agent model {model} (>{timeout}s)")
         if process:
-            process.kill()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
         return None
     except Exception as e:
         print(f"Error querying cursor-agent model {model}: {e}")
