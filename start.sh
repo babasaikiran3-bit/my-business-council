@@ -29,7 +29,7 @@ if [ ! -d node_modules ]; then
     echo "Installing frontend dependencies..."
     npm install
 fi
-VITE_BACKEND_PORT=$BACKEND_PORT npx vite --port $FRONTEND_PORT &
+VITE_BACKEND_PORT=$BACKEND_PORT npx vite --port $FRONTEND_PORT --host &
 FRONTEND_PID=$!
 cd ..
 
