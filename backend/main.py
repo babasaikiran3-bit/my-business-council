@@ -12,14 +12,14 @@ import asyncio
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 from .providers import validate_providers
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL, get_model_name
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL, BACKEND_PORT, FRONTEND_PORT, get_model_name
 
 app = FastAPI(title="LLM Council API")
 
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[f"http://localhost:{FRONTEND_PORT}", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -214,4 +214,4 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=BACKEND_PORT)

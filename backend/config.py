@@ -32,6 +32,10 @@ CHAIRMAN_MODEL = {"provider": "openrouter", "model": "google/gemini-3-pro-previe
 # Title generation model (fast and cheap)
 TITLE_MODEL = {"provider": "openrouter", "model": "google/gemini-2.5-flash"}
 
+# Ports
+BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
+FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "5173"))
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
 

@@ -1,12 +1,21 @@
 #!/bin/bash
 
 # LLM Council - Start script
+# Ports are configurable via .env (BACKEND_PORT, FRONTEND_PORT)
+
+# Load .env if it exists
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+BACKEND_PORT=${BACKEND_PORT:-8001}
+FRONTEND_PORT=${FRONTEND_PORT:-5173}
 
 echo "Starting LLM Council..."
 echo ""
 
 # Start backend
-echo "Starting backend on http://localhost:8001..."
+echo "Starting backend on http://localhost:$BACKEND_PORT..."
 uv run python -m backend.main &
 BACKEND_PID=$!
 
@@ -14,15 +23,16 @@ BACKEND_PID=$!
 sleep 2
 
 # Start frontend
-echo "Starting frontend on http://localhost:5173..."
+echo "Starting frontend on http://localhost:$FRONTEND_PORT..."
 cd frontend
-npm run dev &
+VITE_BACKEND_PORT=$BACKEND_PORT npx vite --port $FRONTEND_PORT &
 FRONTEND_PID=$!
+cd ..
 
 echo ""
-echo "✓ LLM Council is running!"
-echo "  Backend:  http://localhost:8001"
-echo "  Frontend: http://localhost:5173"
+echo "LLM Council is running!"
+echo "  Backend:  http://localhost:$BACKEND_PORT"
+echo "  Frontend: http://localhost:$FRONTEND_PORT"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 
