@@ -20,17 +20,17 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Council members - list of model config dicts
 COUNCIL_MODELS = [
-    {"provider": "openrouter", "model": "openai/gpt-5.1"},
-    {"provider": "openrouter", "model": "google/gemini-3-pro-preview"},
-    {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
-    {"provider": "openrouter", "model": "x-ai/grok-4"},
+    {"provider": "cursor_agent", "model": "gpt-5.2"},
+    {"provider": "cursor_agent", "model": "gemini-3.1-pro"},
+    {"provider": "cursor_agent", "model": "sonnet-4.6"},
+    {"provider": "cursor_agent", "model": "grok"},
 ]
 
 # Chairman model - synthesizes final response
-CHAIRMAN_MODEL = {"provider": "openrouter", "model": "google/gemini-3-pro-preview"}
+CHAIRMAN_MODEL = {"provider": "cursor_agent", "model": "gemini-3.1-pro"}
 
 # Title generation model (fast and cheap)
-TITLE_MODEL = {"provider": "openrouter", "model": "google/gemini-2.5-flash"}
+TITLE_MODEL = {"provider": "cursor_agent", "model": "gemini-3-flash"}
 
 # Ports
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
