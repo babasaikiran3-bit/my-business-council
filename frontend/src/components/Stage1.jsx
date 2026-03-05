@@ -11,7 +11,7 @@ export default function Stage1({ responses }) {
 
   return (
     <div className="stage stage1">
-      <h3 className="stage-title">Stage 1: Individual Responses</h3>
+      <h3 className="stage-title">阶段一：各模型独立回答</h3>
 
       <div className="tabs">
         {responses.map((resp, index) => (

@@ -1,8 +1,8 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from openrouter import query_models_parallel, query_model
+from config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -61,36 +61,38 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     ])
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+    ranking_prompt = f"""你正在评估以下问题的不同回答：
 
-Question: {user_query}
+问题：{user_query}
 
-Here are the responses from different models (anonymized):
+以下是来自不同模型的回答（已匿名处理）：
 
 {responses_text}
 
-Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
+你的任务：
+1. 首先逐一评估每个回答。对每个回答，说明其优点和不足。
+2. 然后在回复的最末尾，给出最终排名。
 
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
+请用中文撰写你的评估内容。
 
-Example of the correct format for your ENTIRE response:
+重要：最终排名必须严格按照以下格式：
+- 以 "FINAL RANKING:" 这一行开头（全大写，带冒号）
+- 然后按从好到差的顺序用编号列表列出回答
+- 每行格式为：数字、句点、空格，然后只写回答标签（例如 "1. Response A"）
+- 排名部分不要添加任何其他文字或说明
 
-Response A provides good detail on X but misses Y...
-Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
+你的完整回复格式示例：
+
+回答A在X方面提供了详细信息，但遗漏了Y...
+回答B内容准确但在Z方面缺乏深度...
+回答C提供了最全面的答案...
 
 FINAL RANKING:
 1. Response C
 2. Response A
 3. Response B
 
-Now provide your evaluation and ranking:"""
+请提供你的评估和排名："""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
@@ -115,7 +117,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    aggregate_rankings: List[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -124,6 +127,7 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        aggregate_rankings: Pre-computed aggregate rankings (optional)
 
     Returns:
         Dict with 'model' and 'response' keys
@@ -139,22 +143,35 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    # Include peer consensus summary if available
+    consensus_text = ""
+    if aggregate_rankings:
+        ranked_lines = "\n".join([
+            f"{i+1}. {agg['model'].split('/')[-1]} (avg rank: {agg['average_rank']:.2f}, votes: {agg['rankings_count']})"
+            for i, agg in enumerate(aggregate_rankings)
+        ])
+        consensus_text = f"""
+PEER CONSENSUS (aggregate rankings, lower score = better):
+{ranked_lines}
 
-Original Question: {user_query}
+"""
 
-STAGE 1 - Individual Responses:
+    chairman_prompt = f"""你是LLM议会的主席。多个AI模型已经对用户的问题提供了回答，并且相互对彼此的回答进行了排名。
+
+原始问题：{user_query}
+{consensus_text}
+阶段一 - 各模型独立回答：
 {stage1_text}
 
-STAGE 2 - Peer Rankings:
+阶段二 - 同行排名：
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
+作为主席，你的任务是将所有这些信息综合成一个针对用户原始问题的单一、全面、准确的答案。请考虑：
+- 各个回答及其见解
+- 同行共识排名作为回答质量的信号
+- 各模型之间的共识或分歧模式
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+请用中文提供一个清晰、有理有据的最终答案，代表议会的集体智慧："""
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
@@ -228,10 +245,8 @@ def calculate_aggregate_rankings(
     model_positions = defaultdict(list)
 
     for ranking in stage2_results:
-        ranking_text = ranking['ranking']
-
-        # Parse the ranking from the structured format
-        parsed_ranking = parse_ranking_from_text(ranking_text)
+        # Reuse already-parsed ranking to avoid redundant text processing
+        parsed_ranking = ranking.get('parsed_ranking') or parse_ranking_from_text(ranking['ranking'])
 
         for position, label in enumerate(parsed_ranking, start=1):
             if label in label_to_model:
@@ -275,7 +290,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    response = await query_model("deepseek-ai/DeepSeek-V3", messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title
@@ -319,11 +334,12 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
-    # Stage 3: Synthesize final answer
+    # Stage 3: Synthesize final answer (pass aggregate rankings for better context)
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        aggregate_rankings
     )
 
     # Prepare metadata

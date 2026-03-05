@@ -23,12 +23,12 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <h3 className="stage-title">阶段二：同行互评排名</h3>
 
-      <h4>Raw Evaluations</h4>
+      <h4>原始评价内容</h4>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
-        Below, model names are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
+        各模型对所有回答（匿名标记为回答 A、B、C 等）进行了评估并排名。
+        下方以<strong>粗体</strong>显示的模型名称仅为便于阅读，原始评价中使用的是匿名标签。
       </p>
 
       <div className="tabs">
@@ -56,7 +56,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
         {rankings[activeTab].parsed_ranking &&
          rankings[activeTab].parsed_ranking.length > 0 && (
           <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
+            <strong>解析出的排名：</strong>
             <ol>
               {rankings[activeTab].parsed_ranking.map((label, i) => (
                 <li key={i}>
@@ -72,9 +72,9 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
       {aggregateRankings && aggregateRankings.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
+          <h4>综合排名（同行公信力）</h4>
           <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
+            汇总所有同行评价的结果（平均分越低越好）：
           </p>
           <div className="aggregate-list">
             {aggregateRankings.map((agg, index) => (
@@ -84,10 +84,10 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
                   {agg.model.split('/')[1] || agg.model}
                 </span>
                 <span className="rank-score">
-                  Avg: {agg.average_rank.toFixed(2)}
+                  均分：{agg.average_rank.toFixed(2)}
                 </span>
                 <span className="rank-count">
-                  ({agg.rankings_count} votes)
+                  （{agg.rankings_count} 票）
                 </span>
               </div>
             ))}
