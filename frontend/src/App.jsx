@@ -9,6 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState('openai');
 
   // Load conversations on mount
   useEffect(() => {
@@ -90,7 +91,7 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(currentConversationId, content, selectedProvider, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -172,13 +173,17 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
+      // Remove optimistic messages on error (if there are enough messages)
       setCurrentConversation((prev) => ({
         ...prev,
-        messages: prev.messages.slice(0, -2),
+        messages: prev.messages.length >= 2 ? prev.messages.slice(0, -2) : [],
       }));
       setIsLoading(false);
     }
+  };
+
+  const handleProviderChange = (provider) => {
+    setSelectedProvider(provider);
   };
 
   return (
@@ -188,6 +193,8 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        selectedProvider={selectedProvider}
+        onProviderChange={handleProviderChange}
       />
       <ChatInterface
         conversation={currentConversation}

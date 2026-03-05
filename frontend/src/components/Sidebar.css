@@ -18,6 +18,60 @@
   color: #333;
 }
 
+.provider-selector {
+  margin-bottom: 12px;
+}
+
+.provider-selector > label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.provider-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-radios label {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.provider-radios input[type="radio"] {
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.provider-dropdown {
+  width: 100%;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  color: #333;
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.2s;
+}
+
+.provider-dropdown:hover {
+  border-color: #4a90e2;
+}
+
+.provider-dropdown:focus {
+  outline: none;
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+}
+
 .new-conversation-btn {
   width: 100%;
   padding: 10px;

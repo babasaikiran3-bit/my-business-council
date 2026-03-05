@@ -1,32 +1,42 @@
 """3-stage LLM Council orchestration."""
 
 from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+import asyncio
+from .providers import get_provider_client
+from .config import PROVIDERS
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(user_query: str, provider: str) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        provider: Provider name
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
+    if provider not in PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    provider_config = PROVIDERS[provider]
+    council_models = provider_config["council_models"]
+
+    client = get_provider_client(provider)
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    tasks = [client.chat(model, messages) for model in council_models]
+    responses = await asyncio.gather(*tasks)
 
     # Format results
     stage1_results = []
-    for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+    for model, response in zip(council_models, responses):
+        if response is not None:
             stage1_results.append({
                 "model": model,
-                "response": response.get('content', '')
+                "response": response
             })
 
     return stage1_results
@@ -34,7 +44,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    provider: str
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -94,18 +105,21 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
+    client = get_provider_client(provider)
+    council_models = PROVIDERS[provider]["council_models"]
+
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    tasks = [client.chat(model, messages) for model in council_models]
+    responses = await asyncio.gather(*tasks)
 
     # Format results
     stage2_results = []
-    for model, response in responses.items():
+    for model, response in zip(council_models, responses):
         if response is not None:
-            full_text = response.get('content', '')
-            parsed = parse_ranking_from_text(full_text)
+            parsed = parse_ranking_from_text(response)
             stage2_results.append({
                 "model": model,
-                "ranking": full_text,
+                "ranking": response,
                 "parsed_ranking": parsed
             })
 
@@ -115,7 +129,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    provider: str
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -124,10 +139,17 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        provider: Provider name
 
     Returns:
         Dict with 'model' and 'response' keys
     """
+    if provider not in PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    provider_config = PROVIDERS[provider]
+    chairman_model = provider_config["chairman"]
+
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
@@ -158,19 +180,18 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    client = get_provider_client(provider)
+    response = await client.chat(chairman_model, messages)
 
     if response is None:
-        # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": chairman_model,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "model": chairman_model,
+        "response": response
     }
 
 
@@ -255,12 +276,13 @@ def calculate_aggregate_rankings(
     return aggregate
 
 
-async def generate_conversation_title(user_query: str) -> str:
+async def generate_conversation_title(user_query: str, provider: str = "gemini") -> str:
     """
     Generate a short title for a conversation based on the first user message.
 
     Args:
         user_query: The first user message
+        provider: Provider to use for title generation (default: gemini)
 
     Returns:
         A short title (3-5 words)
@@ -274,47 +296,51 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    try:
+        client = get_provider_client(provider)
+        title_model = PROVIDERS[provider]["council_models"][0]
+        response = await client.chat(title_model, messages)
 
-    if response is None:
-        # Fallback to a generic title
+        if response is None:
+            return "New Conversation"
+
+        title = response.strip()
+        title = title.strip('"\'')
+
+        if len(title) > 50:
+            title = title[:47] + "..."
+
+        return title
+    except Exception:
         return "New Conversation"
 
-    title = response.get('content', 'New Conversation').strip()
 
-    # Clean up the title - remove quotes, limit length
-    title = title.strip('"\'')
-
-    # Truncate if too long
-    if len(title) > 50:
-        title = title[:47] + "..."
-
-    return title
-
-
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, provider: str) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        provider: Provider name
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
+    if provider not in PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider}")
+
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, provider)
 
     # If no models responded successfully, return error
     if not stage1_results:
         return [], [], {
             "model": "error",
-            "response": "All models failed to respond. Please try again."
+            "response": f"Provider {provider} error: All models failed to respond."
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results, provider)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -323,7 +349,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        provider
     )
 
     # Prepare metadata

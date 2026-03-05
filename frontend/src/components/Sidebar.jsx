@@ -6,11 +6,60 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  selectedProvider,
+  onProviderChange,
 }) {
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         <h1>LLM Council</h1>
+        
+        <div className="provider-selector">
+          <label>Model Provider:</label>
+          <div className="provider-radios">
+            <label>
+              <input
+                type="radio"
+                name="provider"
+                value="openai"
+                checked={selectedProvider === 'openai'}
+                onChange={(e) => onProviderChange(e.target.value)}
+              />
+              OpenAI
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="provider"
+                value="gemini"
+                checked={selectedProvider === 'gemini'}
+                onChange={(e) => onProviderChange(e.target.value)}
+              />
+              Gemini
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="provider"
+                value="claude"
+                checked={selectedProvider === 'claude'}
+                onChange={(e) => onProviderChange(e.target.value)}
+              />
+              Claude
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="provider"
+                value="cerebras"
+                checked={selectedProvider === 'cerebras'}
+                onChange={(e) => onProviderChange(e.target.value)}
+              />
+              Cerebras
+            </label>
+          </div>
+        </div>
+
         <button className="new-conversation-btn" onClick={onNewConversation}>
           + New Conversation
         </button>
