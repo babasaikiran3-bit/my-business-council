@@ -23,12 +23,12 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <h3 className="stage-title">Stage 2: Peer Review & Ranking</h3>
 
-      <h4>Raw Evaluations</h4>
+      <h4>Raw Evaluation Content</h4>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
-        Below, model names are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
+        Models evaluated and ranked all responses (anonymized as Response A, B, C, etc.).
+        Model names shown in <strong>bold</strong> below are for readability only; anonymous labels were used in the original evaluation.
       </p>
 
       <div className="tabs">
@@ -56,7 +56,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
         {rankings[activeTab].parsed_ranking &&
          rankings[activeTab].parsed_ranking.length > 0 && (
           <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
+            <strong>Parsed Rankings:</strong>
             <ol>
               {rankings[activeTab].parsed_ranking.map((label, i) => (
                 <li key={i}>
@@ -72,9 +72,9 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
       {aggregateRankings && aggregateRankings.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
+          <h4>Aggregate Rankings (Peer Credibility)</h4>
           <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
+            Summary of all peer evaluations (lower average is better):
           </p>
           <div className="aggregate-list">
             {aggregateRankings.map((agg, index) => (
@@ -84,7 +84,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
                   {agg.model.split('/')[1] || agg.model}
                 </span>
                 <span className="rank-score">
-                  Avg: {agg.average_rank.toFixed(2)}
+                  Avg Score: {agg.average_rank.toFixed(2)}
                 </span>
                 <span className="rank-count">
                   ({agg.rankings_count} votes)

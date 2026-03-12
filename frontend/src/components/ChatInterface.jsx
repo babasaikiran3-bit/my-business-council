@@ -42,7 +42,7 @@ export default function ChatInterface({
       <div className="chat-interface">
         <div className="empty-state">
           <h2>Welcome to LLM Council</h2>
-          <p>Create a new conversation to get started</p>
+          <p>Create a new conversation to start asking questions</p>
         </div>
       </div>
     );
@@ -53,8 +53,8 @@ export default function ChatInterface({
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <h2>Start Conversation</h2>
+            <p>Ask the LLM Council to get collaborative answers from multiple models</p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -76,7 +76,7 @@ export default function ChatInterface({
                   {msg.loading?.stage1 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
+                      <span>Stage 1 in progress: Collecting independent model responses...</span>
                     </div>
                   )}
                   {msg.stage1 && <Stage1 responses={msg.stage1} />}
@@ -85,7 +85,7 @@ export default function ChatInterface({
                   {msg.loading?.stage2 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
+                      <span>Stage 2 in progress: Peer review & ranking...</span>
                     </div>
                   )}
                   {msg.stage2 && (
@@ -100,7 +100,7 @@ export default function ChatInterface({
                   {msg.loading?.stage3 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
+                      <span>Stage 3 in progress: Chairman synthesizing final answer...</span>
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
@@ -124,7 +124,7 @@ export default function ChatInterface({
         <form className="input-form" onSubmit={handleSubmit}>
           <textarea
             className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+            placeholder="Enter your question... (Shift+Enter for newline, Enter to send)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

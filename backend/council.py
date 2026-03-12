@@ -15,7 +15,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    english_query = f"{user_query}\n\nPlease reply in English."
+    messages = [{"role": "user", "content": english_query}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
@@ -23,10 +24,16 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        if response is not None:
             stage1_results.append({
                 "model": model,
                 "response": response.get('content', '')
+            })
+        else:
+            # Inject an error response so the UI still shows the model tried
+            stage1_results.append({
+                "model": model,
+                "response": f"Error: The model `{model}` failed to return a response from the API."
             })
 
     return stage1_results
@@ -65,32 +72,34 @@ async def stage2_collect_rankings(
 
 Question: {user_query}
 
-Here are the responses from different models (anonymized):
+Below are the responses from different models (anonymized):
 
 {responses_text}
 
 Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
+1. First, evaluate each response one by one. For each response, explain its strengths and weaknesses.
+2. Then, at the very end of your reply, provide the final ranking.
 
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
+Please write your evaluation in English.
 
-Example of the correct format for your ENTIRE response:
+IMPORTANT: The final ranking MUST strictly follow this format:
+- Start with the line "FINAL RANKING:" (all caps, with a colon)
+- Then list the responses in order from best to worst using a numbered list.
+- Each line format should be: number, period, space, and then ONLY the response label (e.g., "1. Response A")
+- Do NOT add any surrounding text or explanations in the ranking section.
 
-Response A provides good detail on X but misses Y...
+Example of your full reply format:
+
+Response A provided detailed information on X, but missed Y...
 Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
+Response C gives the most comprehensive answer...
 
 FINAL RANKING:
 1. Response C
 2. Response A
 3. Response B
 
-Now provide your evaluation and ranking:"""
+Please provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
@@ -115,7 +124,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    aggregate_rankings: List[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -124,6 +134,7 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        aggregate_rankings: Pre-computed aggregate rankings (optional)
 
     Returns:
         Dict with 'model' and 'response' keys
@@ -139,22 +150,35 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    # Include peer consensus summary if available
+    consensus_text = ""
+    if aggregate_rankings:
+        ranked_lines = "\n".join([
+            f"{i+1}. {agg['model'].split('/')[-1]} (avg rank: {agg['average_rank']:.2f}, votes: {agg['rankings_count']})"
+            for i, agg in enumerate(aggregate_rankings)
+        ])
+        consensus_text = f"""
+PEER CONSENSUS (aggregate rankings, lower score = better):
+{ranked_lines}
+
+"""
+
+    chairman_prompt = f"""You are the Chairman of the LLM Council. Multiple AI models have provided responses to a user's question, and they have also ranked each other's responses.
 
 Original Question: {user_query}
-
-STAGE 1 - Individual Responses:
+{consensus_text}
+Stage 1 - Independent Model Responses:
 {stage1_text}
 
-STAGE 2 - Peer Rankings:
+Stage 2 - Peer Rankings:
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
+As the Chairman, your task is to synthesize all this information into a single, comprehensive, and accurate final answer to the user's original question. Please consider:
 - The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
+- The peer consensus ranking as a strong signal for response quality
+- The patterns of agreement or disagreement among the models
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+Please provide a clear, well-reasoned final answer in English that represents the collective wisdom of the council:"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
@@ -228,10 +252,8 @@ def calculate_aggregate_rankings(
     model_positions = defaultdict(list)
 
     for ranking in stage2_results:
-        ranking_text = ranking['ranking']
-
-        # Parse the ranking from the structured format
-        parsed_ranking = parse_ranking_from_text(ranking_text)
+        # Reuse already-parsed ranking to avoid redundant text processing
+        parsed_ranking = ranking.get('parsed_ranking') or parse_ranking_from_text(ranking['ranking'])
 
         for position, label in enumerate(parsed_ranking, start=1):
             if label in label_to_model:
@@ -265,6 +287,12 @@ async def generate_conversation_title(user_query: str) -> str:
     Returns:
         A short title (3-5 words)
     """
+    import asyncio
+    
+    # Delay title generation slightly to prevent hitting free-tier concurrent rate limits
+    # during the heavy Stage 1 parallel query
+    await asyncio.sleep(2.0)
+    
     title_prompt = f"""Generate a very short title (3-5 words maximum) that summarizes the following question.
 The title should be concise and descriptive. Do not use quotes or punctuation in the title.
 
@@ -275,7 +303,7 @@ Title:"""
     messages = [{"role": "user", "content": title_prompt}]
 
     # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    response = await query_model("arcee-ai/trinity-large-preview:free", messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title
@@ -319,11 +347,12 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
-    # Stage 3: Synthesize final answer
+    # Stage 3: Synthesize final answer (pass aggregate rankings for better context)
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        aggregate_rankings
     )
 
     # Prepare metadata

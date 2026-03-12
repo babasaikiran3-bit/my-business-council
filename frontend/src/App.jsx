@@ -53,6 +53,32 @@ function App() {
     }
   };
 
+  const handleNewTemporaryConversation = async () => {
+    try {
+      const newConv = await api.createConversation(true);
+      setConversations([
+        { id: newConv.id, created_at: newConv.created_at, message_count: 0, is_temporary: true },
+        ...conversations,
+      ]);
+      setCurrentConversationId(newConv.id);
+    } catch (error) {
+      console.error('Failed to create temporary conversation:', error);
+    }
+  };
+
+  const handleDeleteConversation = async (id) => {
+    try {
+      await api.deleteConversation(id);
+      setConversations(conversations.filter(c => c.id !== id));
+      if (currentConversationId === id) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
+  };
+
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
   };
@@ -188,6 +214,8 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onNewTemporaryConversation={handleNewTemporaryConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <ChatInterface
         conversation={currentConversation}

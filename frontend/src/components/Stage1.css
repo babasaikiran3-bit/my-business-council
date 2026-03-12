@@ -1,16 +1,24 @@
 .stage {
   margin: 24px 0;
-  padding: 20px;
-  background: #fafafa;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  padding: 24px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.stage1 {
+  border-left: 4px solid var(--accent-blue);
 }
 
 .stage-title {
-  margin: 0 0 16px 0;
-  color: #333;
+  margin: 0 0 20px 0;
+  color: #fff;
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .tabs {
@@ -22,44 +30,45 @@
 
 .tab {
   padding: 8px 16px;
-  background: #ffffff;
-  border: 1px solid #d0d0d0;
-  border-radius: 6px 6px 0 0;
-  color: #666;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .tab:hover {
-  background: #f0f0f0;
-  color: #333;
-  border-color: #4a90e2;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 .tab.active {
-  background: #ffffff;
-  color: #4a90e2;
-  border-color: #4a90e2;
-  border-bottom-color: #ffffff;
-  font-weight: 600;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: inset 0 0 10px rgba(59, 130, 246, 0.1);
 }
 
 .tab-content {
-  background: #ffffff;
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  border-radius: var(--radius-md);
+  border: 1px inset rgba(255, 255, 255, 0.05);
 }
 
 .model-name {
-  color: #888;
-  font-size: 12px;
-  margin-bottom: 12px;
-  font-family: monospace;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .response-text {
-  color: #333;
+  color: var(--text-primary);
   line-height: 1.6;
 }

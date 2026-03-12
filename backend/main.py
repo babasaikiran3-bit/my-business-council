@@ -11,13 +11,23 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .openrouter import close_client
 
-app = FastAPI(title="LLM Council API")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_client()
+
+
+app = FastAPI(title="LLM Council API", lifespan=lifespan)
 
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://gongchuang.zeabur.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,7 +36,7 @@ app.add_middleware(
 
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
-    pass
+    is_temporary: bool = False
 
 
 class SendMessageRequest(BaseModel):
@@ -66,7 +76,7 @@ async def list_conversations():
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    conversation = storage.create_conversation(conversation_id, request.is_temporary)
     return conversation
 
 
@@ -79,34 +89,40 @@ async def get_conversation(conversation_id: str):
     return conversation
 
 
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    success = storage.delete_conversation(conversation_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"status": "success", "message": "Conversation deleted"}
+
+
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
-    # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
-
-    # Add user message
     storage.add_user_message(conversation_id, request.content)
 
-    # If this is the first message, generate a title
+    # Run title generation in parallel with council processing when it's the first message
     if is_first_message:
-        title = await generate_conversation_title(request.content)
+        council_task = asyncio.create_task(run_full_council(request.content))
+        title_task = asyncio.create_task(generate_conversation_title(request.content))
+        stage1_results, stage2_results, stage3_result, metadata = await council_task
+        title = await title_task
         storage.update_conversation_title(conversation_id, title)
+    else:
+        stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+            request.content
+        )
 
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
-    )
-
-    # Add assistant message with all stages
     storage.add_assistant_message(
         conversation_id,
         stage1_results,
@@ -114,7 +130,6 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         stage3_result
     )
 
-    # Return the complete response with metadata
     return {
         "stage1": stage1_results,
         "stage2": stage2_results,
@@ -127,49 +142,45 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
     Send a message and stream the 3-stage council process.
-    Returns Server-Sent Events as each stage completes.
     """
-    # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
     async def event_generator():
         try:
-            # Add user message
             storage.add_user_message(conversation_id, request.content)
 
-            # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
             # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+            yield f"data: {json.dumps({'type': 'stage1_start'}, ensure_ascii=False)}\n\n"
             stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
-
+            # 关键修复点：确保所有 yield 都加了 ensure_ascii=False
+            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results}, ensure_ascii=False)}\n\n"
+            
             # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+            yield f"data: {json.dumps({'type': 'stage2_start'}, ensure_ascii=False)}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            # 关键修复点：Stage 2 必须加 ensure_ascii=False，否则中文排名解析必崩
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}}, ensure_ascii=False)}\n\n"
 
-            # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+            # Stage 3: Synthesize final answer (with aggregate rankings for better context)
+            yield f"data: {json.dumps({'type': 'stage3_start'}, ensure_ascii=False)}\n\n"
+            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, aggregate_rankings)
+            # 关键修复点：Stage 3 是最终答案，最容易出现 Unicode 报错
+            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result}, ensure_ascii=False)}\n\n"
 
-            # Wait for title generation if it was started
             if title_task:
                 title = await title_task
                 storage.update_conversation_title(conversation_id, title)
-                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
+                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}}, ensure_ascii=False)}\n\n"
 
-            # Save complete assistant message
             storage.add_assistant_message(
                 conversation_id,
                 stage1_results,
@@ -177,12 +188,10 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 stage3_result
             )
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            # Send error event
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -196,4 +205,6 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    import os
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
