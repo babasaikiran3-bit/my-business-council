@@ -1,32 +1,36 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from typing import List, Dict, Any, Tuple, Optional
+from .llm_providers import call_models_parallel, call_model, ModelConfig, Attachment
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(
+    user_query: str,
+    attachments: Optional[List[Attachment]] = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        attachments: Optional list of file attachments (images, documents)
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
     messages = [{"role": "user", "content": user_query}]
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Query all models in parallel, passing attachments
+    responses = await call_models_parallel(COUNCIL_MODELS, messages, attachments=attachments)
 
     # Format results
     stage1_results = []
-    for model, response in responses.items():
+    for model_config, response in responses.items():
         if response is not None:  # Only include successful responses
             stage1_results.append({
-                "model": model,
-                "response": response.get('content', '')
+                "model": model_config.display_name,
+                "response": response
             })
 
     return stage1_results
@@ -38,6 +42,8 @@ async def stage2_collect_rankings(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
+
+    Note: Attachments are NOT passed to stage 2 - models evaluate text responses only.
 
     Args:
         user_query: The original user query
@@ -94,18 +100,17 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    # Get rankings from all council models in parallel (no attachments for ranking)
+    responses = await call_models_parallel(COUNCIL_MODELS, messages)
 
     # Format results
     stage2_results = []
-    for model, response in responses.items():
+    for model_config, response in responses.items():
         if response is not None:
-            full_text = response.get('content', '')
-            parsed = parse_ranking_from_text(full_text)
+            parsed = parse_ranking_from_text(response)
             stage2_results.append({
-                "model": model,
-                "ranking": full_text,
+                "model": model_config.display_name,
+                "ranking": response,
                 "parsed_ranking": parsed
             })
 
@@ -119,6 +124,8 @@ async def stage3_synthesize_final(
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
+
+    Note: Attachments are NOT passed to stage 3 - chairman synthesizes from text responses.
 
     Args:
         user_query: The original user query
@@ -158,19 +165,19 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    # Query the chairman model (no attachments for synthesis)
+    response = await call_model(CHAIRMAN_MODEL, messages)
 
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": CHAIRMAN_MODEL.display_name,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "model": CHAIRMAN_MODEL.display_name,
+        "response": response
     }
 
 
@@ -274,14 +281,14 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use the configured title model
+    response = await call_model(TITLE_MODEL, messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title
         return "New Conversation"
 
-    title = response.get('content', 'New Conversation').strip()
+    title = response.strip()
 
     # Clean up the title - remove quotes, limit length
     title = title.strip('"\'')
@@ -293,18 +300,22 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    attachments: Optional[List[Attachment]] = None
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        attachments: Optional list of file attachments (only used in Stage 1)
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    # Stage 1: Collect individual responses (with attachments)
+    stage1_results = await stage1_collect_responses(user_query, attachments)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -313,13 +324,13 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
             "response": "All models failed to respond. Please try again."
         }, {}
 
-    # Stage 2: Collect rankings
+    # Stage 2: Collect rankings (no attachments - evaluate text only)
     stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
-    # Stage 3: Synthesize final answer
+    # Stage 3: Synthesize final answer (no attachments - synthesize from text)
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
