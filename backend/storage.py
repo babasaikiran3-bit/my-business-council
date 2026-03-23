@@ -1,35 +1,20 @@
-"""JSON-based storage for conversations."""
+"""Supabase-based storage for conversations."""
 
-import json
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from pathlib import Path
+from supabase import create_client, Client
 from .config import DATA_DIR
 
 
-def ensure_data_dir():
-    """Ensure the data directory exists."""
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-
-
-def get_conversation_path(conversation_id: str) -> str:
-    """Get the file path for a conversation."""
-    return os.path.join(DATA_DIR, f"{conversation_id}.json")
+def get_client() -> Client:
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+    return create_client(url, key)
 
 
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
-    """
-    Create a new conversation.
-
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        New conversation dict
-    """
-    ensure_data_dir()
-
+    """Create a new conversation."""
     conversation = {
         "id": conversation_id,
         "created_at": datetime.utcnow().isoformat(),
@@ -37,84 +22,55 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "messages": []
     }
 
-    # Save to file
-    path = get_conversation_path(conversation_id)
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
-
+    get_client().table("conversations").insert(conversation).execute()
     return conversation
 
 
 def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Load a conversation from storage.
+    """Load a conversation from Supabase."""
+    result = (
+        get_client()
+        .table("conversations")
+        .select("*")
+        .eq("id", conversation_id)
+        .execute()
+    )
 
-    Args:
-        conversation_id: Unique identifier for the conversation
-
-    Returns:
-        Conversation dict or None if not found
-    """
-    path = get_conversation_path(conversation_id)
-
-    if not os.path.exists(path):
+    if not result.data:
         return None
 
-    with open(path, 'r') as f:
-        return json.load(f)
+    return result.data[0]
 
 
 def save_conversation(conversation: Dict[str, Any]):
-    """
-    Save a conversation to storage.
-
-    Args:
-        conversation: Conversation dict to save
-    """
-    ensure_data_dir()
-
-    path = get_conversation_path(conversation['id'])
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
+    """Save a conversation to Supabase."""
+    get_client().table("conversations").upsert(conversation).execute()
 
 
 def list_conversations() -> List[Dict[str, Any]]:
-    """
-    List all conversations (metadata only).
-
-    Returns:
-        List of conversation metadata dicts
-    """
-    ensure_data_dir()
+    """List all conversations (metadata only)."""
+    result = (
+        get_client()
+        .table("conversations")
+        .select("id, created_at, title, messages")
+        .order("created_at", desc=True)
+        .execute()
+    )
 
     conversations = []
-    for filename in os.listdir(DATA_DIR):
-        if filename.endswith('.json'):
-            path = os.path.join(DATA_DIR, filename)
-            with open(path, 'r') as f:
-                data = json.load(f)
-                # Return metadata only
-                conversations.append({
-                    "id": data["id"],
-                    "created_at": data["created_at"],
-                    "title": data.get("title", "New Conversation"),
-                    "message_count": len(data["messages"])
-                })
-
-    # Sort by creation time, newest first
-    conversations.sort(key=lambda x: x["created_at"], reverse=True)
+    for data in result.data:
+        conversations.append({
+            "id": data["id"],
+            "created_at": data["created_at"],
+            "title": data.get("title", "New Conversation"),
+            "message_count": len(data["messages"])
+        })
 
     return conversations
 
 
 def add_user_message(conversation_id: str, content: str):
-    """
-    Add a user message to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        content: User message content
-    """
+    """Add a user message to a conversation."""
     conversation = get_conversation(conversation_id)
     if conversation is None:
         raise ValueError(f"Conversation {conversation_id} not found")
@@ -133,15 +89,7 @@ def add_assistant_message(
     stage2: List[Dict[str, Any]],
     stage3: Dict[str, Any]
 ):
-    """
-    Add an assistant message with all 3 stages to a conversation.
-
-    Args:
-        conversation_id: Conversation identifier
-        stage1: List of individual model responses
-        stage2: List of model rankings
-        stage3: Final synthesized response
-    """
+    """Add an assistant message with all 3 stages to a conversation."""
     conversation = get_conversation(conversation_id)
     if conversation is None:
         raise ValueError(f"Conversation {conversation_id} not found")
@@ -157,16 +105,60 @@ def add_assistant_message(
 
 
 def update_conversation_title(conversation_id: str, title: str):
-    """
-    Update the title of a conversation.
+    """Update the title of a conversation."""
+    get_client().table("conversations").update(
+        {"title": title}
+    ).eq("id", conversation_id).execute()
 
-    Args:
-        conversation_id: Conversation identifier
-        title: New title for the conversation
-    """
-    conversation = get_conversation(conversation_id)
-    if conversation is None:
-        raise ValueError(f"Conversation {conversation_id} not found")
 
-    conversation["title"] = title
-    save_conversation(conversation)
+def record_model_appearances(models: list, rankings: list):
+    """
+    Record appearances and wins for all models after a council round.
+    """
+    client = get_client()
+
+    for model in models:
+        rank_entry = next((r for r in rankings if r["model"] == model), None)
+        avg_rank = float(rank_entry["average_rank"]) if rank_entry else 0.0
+        is_winner = rankings[0]["model"] == model if rankings else False
+
+        result = client.table("model_stats").select("*").eq("model", model).execute()
+
+        if result.data:
+            existing = result.data[0]
+            new_appearances = existing["total_appearances"] + 1
+            new_wins = existing["wins"] + (1 if is_winner else 0)
+            new_rank_points = float(existing["total_rank_points"]) + avg_rank
+            new_avg_rank = round(new_rank_points / new_appearances, 2)
+            new_win_rate = round(new_wins / new_appearances, 2)
+
+            client.table("model_stats").update({
+                "wins": new_wins,
+                "total_appearances": new_appearances,
+                "win_rate": new_win_rate,
+                "avg_rank": new_avg_rank,
+                "total_rank_points": new_rank_points,
+                "last_updated": datetime.utcnow().isoformat()
+            }).eq("model", model).execute()
+        else:
+            client.table("model_stats").insert({
+                "model": model,
+                "wins": 1 if is_winner else 0,
+                "total_appearances": 1,
+                "win_rate": 1.0 if is_winner else 0.0,
+                "avg_rank": avg_rank,
+                "total_rank_points": avg_rank,
+                "last_updated": datetime.utcnow().isoformat()
+            }).execute()
+
+
+def get_model_stats() -> list:
+    """Get all model stats sorted by win rate."""
+    result = (
+        get_client()
+        .table("model_stats")
+        .select("*")
+        .order("win_rate", desc=True)
+        .execute()
+    )
+    return result.data

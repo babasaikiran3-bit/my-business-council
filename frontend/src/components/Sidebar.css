@@ -1,10 +1,13 @@
 .sidebar {
-  width: 260px;
+  width: min(300px, 100vw);
+  flex-shrink: 0;
   background: #f8f8f8;
   border-right: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
+  position: relative;
+  z-index: 999;
 }
 
 .sidebar-header {
@@ -12,10 +15,28 @@
   border-bottom: 1px solid #e0e0e0;
 }
 
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .sidebar-header h1 {
   font-size: 18px;
-  margin: 0 0 12px 0;
+  margin: 0;
   color: #333;
+}
+
+.sidebar-close-btn {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: #666;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
 }
 
 .new-conversation-btn {
@@ -70,9 +91,32 @@
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  word-break: break-word;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 18px 0 40px rgba(15, 23, 42, 0.18);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 }

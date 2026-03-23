@@ -1,5 +1,6 @@
 """FastAPI backend for LLM Council."""
-
+import logging
+from . import config as app_config
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -12,17 +13,18 @@ import asyncio
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="LLM Council API")
 
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
@@ -85,28 +87,21 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
-    # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
-
-    # Add user message
     storage.add_user_message(conversation_id, request.content)
 
-    # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
-    # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
         request.content
     )
 
-    # Add assistant message with all stages
     storage.add_assistant_message(
         conversation_id,
         stage1_results,
@@ -114,7 +109,6 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         stage3_result
     )
 
-    # Return the complete response with metadata
     return {
         "stage1": stage1_results,
         "stage2": stage2_results,
@@ -129,47 +123,49 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
-    # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
     async def event_generator():
         try:
-            # Add user message
             storage.add_user_message(conversation_id, request.content)
 
-            # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
+            # Stage 1
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
             stage1_results = await stage1_collect_responses(request.content)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
-            # Stage 2: Collect rankings
+            # Stage 2
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
-            # Stage 3: Synthesize final answer
+            # ← NEW: Record model stats after Stage 2
+            try:
+                all_models = [r["model"] for r in stage1_results]
+                storage.record_model_appearances(all_models, aggregate_rankings)
+                logger.info(f"Stats recorded for models: {all_models}")
+            except Exception as e:
+                logger.exception(f"STATS ERROR: {e}")
+
+            # Stage 3
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
-            # Wait for title generation if it was started
             if title_task:
                 title = await title_task
                 storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
             storage.add_assistant_message(
                 conversation_id,
                 stage1_results,
@@ -177,11 +173,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 stage3_result
             )
 
-            # Send completion event
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
         except Exception as e:
-            # Send error event
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -192,6 +186,34 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             "Connection": "keep-alive",
         }
     )
+
+
+@app.get("/api/config")
+async def get_config():
+    """Get current council configuration."""
+    cfg = app_config.load_config()
+    return cfg
+
+
+@app.post("/api/config")
+async def update_config(data: dict):
+    """Update council models configuration."""
+    council_models = data.get("council_models", app_config.DEFAULT_COUNCIL_MODELS)
+    chairman_model = data.get("chairman_model", app_config.DEFAULT_CHAIRMAN_MODEL)
+
+    app_config.save_config(council_models, chairman_model)
+
+    app_config.COUNCIL_MODELS = council_models
+    app_config.CHAIRMAN_MODEL = chairman_model
+
+    return {"status": "ok", "council_models": council_models, "chairman_model": chairman_model}
+
+
+@app.get("/api/stats")
+async def get_stats():
+    """Get model performance stats."""
+    from . import storage
+    return storage.get_model_stats()
 
 
 if __name__ == "__main__":

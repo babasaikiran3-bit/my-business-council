@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -6,11 +5,23 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  isOpen,
+  onClose,
 }) {
   return (
-    <div className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
       <div className="sidebar-header">
-        <h1>LLM Council</h1>
+        <div className="sidebar-header-row">
+          <h1>LLM Council</h1>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Close conversations"
+          >
+            ✕
+          </button>
+        </div>
         <button className="new-conversation-btn" onClick={onNewConversation}>
           + New Conversation
         </button>
@@ -38,6 +49,6 @@ export default function Sidebar({
           ))
         )}
       </div>
-    </div>
+    </aside>
   );
 }
