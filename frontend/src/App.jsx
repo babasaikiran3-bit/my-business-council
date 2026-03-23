@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import Settings from './Settings';
+import Leaderboard from './Leaderboard';
 import { api } from './api';
 import './App.css';
 
@@ -9,36 +11,54 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Load conversations on mount
+
   useEffect(() => {
-    loadConversations();
+    let isActive = true;
+
+    const fetchConversations = async () => {
+      try {
+        const convs = await api.listConversations();
+        if (isActive) {
+          setConversations(convs);
+        }
+      } catch (error) {
+        console.error('Failed to load conversations:', error);
+      }
+    };
+
+    fetchConversations();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
-  // Load conversation details when selected
   useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
+    if (!currentConversationId) return undefined;
+
+    let isActive = true;
+
+    const fetchConversation = async () => {
+      try {
+        const conv = await api.getConversation(currentConversationId);
+        if (isActive) {
+          setCurrentConversation(conv);
+        }
+      } catch (error) {
+        console.error('Failed to load conversation:', error);
+      }
+    };
+
+    fetchConversation();
+
+    return () => {
+      isActive = false;
+    };
   }, [currentConversationId]);
-
-  const loadConversations = async () => {
-    try {
-      const convs = await api.listConversations();
-      setConversations(convs);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
-    }
-  };
-
-  const loadConversation = async (id) => {
-    try {
-      const conv = await api.getConversation(id);
-      setCurrentConversation(conv);
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    }
-  };
 
   const handleNewConversation = async () => {
     try {
@@ -48,6 +68,7 @@ function App() {
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      setIsSidebarOpen(false);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -55,6 +76,7 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    setIsSidebarOpen(false);
   };
 
   const handleSendMessage = async (content) => {
@@ -62,14 +84,12 @@ function App() {
 
     setIsLoading(true);
     try {
-      // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
       setCurrentConversation((prev) => ({
         ...prev,
         messages: [...prev.messages, userMessage],
       }));
 
-      // Create a partial assistant message that will be updated progressively
       const assistantMessage = {
         role: 'assistant',
         stage1: null,
@@ -83,13 +103,11 @@ function App() {
         },
       };
 
-      // Add the partial assistant message
       setCurrentConversation((prev) => ({
         ...prev,
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
@@ -151,13 +169,15 @@ function App() {
             break;
 
           case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
+            api.listConversations().then(setConversations).catch((error) => {
+              console.error('Failed to load conversations:', error);
+            });
             break;
 
           case 'complete':
-            // Stream complete, reload conversations list
-            loadConversations();
+            api.listConversations().then(setConversations).catch((error) => {
+              console.error('Failed to load conversations:', error);
+            });
             setIsLoading(false);
             break;
 
@@ -172,7 +192,6 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
       setCurrentConversation((prev) => ({
         ...prev,
         messages: prev.messages.slice(0, -2),
@@ -182,12 +201,54 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${isSidebarOpen ? 'sidebar-open' : ''}`}>
+      <div className="app-toolbar">
+        <button
+          type="button"
+          className="toolbar-button mobile-only"
+          onClick={() => setIsSidebarOpen((prev) => !prev)}
+          aria-label={isSidebarOpen ? 'Close conversations' : 'Open conversations'}
+          aria-expanded={isSidebarOpen}
+        >
+          ☰
+        </button>
+
+        <div className="toolbar-actions">
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={() => setShowLeaderboard(true)}
+            aria-label="Open leaderboard"
+          >
+            🏆
+          </button>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={() => setShowSettings(true)}
+            aria-label="Open settings"
+          >
+            ⚙️
+          </button>
+        </div>
+      </div>
+
+      {showLeaderboard && <Leaderboard onClose={() => setShowLeaderboard(false)} />}
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+
+      <div
+        className="sidebar-backdrop"
+        onClick={() => setIsSidebarOpen(false)}
+        aria-hidden={!isSidebarOpen}
+      />
+
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
       <ChatInterface
         conversation={currentConversation}
