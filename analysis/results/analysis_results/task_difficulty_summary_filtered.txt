@@ -1,0 +1,77 @@
+================================================================================
+Task Difficulty Analysis - Filtered High-Quality Data
+================================================================================
+
+METHODOLOGY:
+--------------------------------------------------------------------------------
+Used only high-quality experiments (<20% unknown rate)
+20 experiments, 2,000 predictions with improved answer extraction
+Excluded 4 low-quality experiments with severe extraction failures
+
+KEY FINDINGS:
+--------------------------------------------------------------------------------
+
+1. OVERALL ACCURACY BY DATASET:
+
+   MEDQA:
+     1-stage: 0.690, 3-stage: 0.770
+     Change: +0.080 (+11.6%) - debate HELPS ✓
+
+   MMLU:
+     1-stage: 0.867, 3-stage: 0.940
+     Change: +0.073 (+8.5%) - debate HELPS ✓
+
+   PUBMEDQA:
+     1-stage: 0.675, 3-stage: 0.328
+     Change: -0.347 (-51.4%) - debate hurts ✗
+
+2. PER-CLASS BREAKDOWN:
+
+   MEDQA:
+     a: 0.726 → 0.750 (+0.024, +3.3%) - neutral
+     b: 0.684 → 0.737 (+0.053, +7.7%) - helps ✓
+     c: 0.688 → 0.781 (+0.094, +13.6%) - helps ✓
+     d: 0.651 → 0.810 (+0.159, +24.4%) - helps ✓
+
+   MMLU:
+     a: 0.907 → 0.944 (+0.037, +4.1%) - neutral
+     b: 0.880 → 0.960 (+0.080, +9.1%) - helps ✓
+     c: 0.840 → 0.960 (+0.120, +14.3%) - helps ✓
+     d: 0.854 → 0.906 (+0.052, +6.1%) - helps ✓
+
+   PUBMEDQA:
+     maybe: 0.189 → 0.800 (+0.611, +323.5%) - helps ✓
+     no: 0.729 → 0.263 (-0.467, -64.0%) - hurts ✗
+     yes: 0.789 → 0.230 (-0.559, -70.9%) - hurts ✗
+
+3. DIFFICULTY STRATIFICATION:
+   (Questions categorized by 1-stage baseline accuracy)
+
+   EASY  : 0.979 → 0.466 (-0.513, -52.4%)
+           ✗ Debate harmful
+
+   MEDIUM: 0.667 → 0.514 (-0.153, -23.0%)
+           ✗ Debate harmful
+
+   HARD  : 0.327 → 0.423 (+0.096, +29.4%)
+           ✓ Debate significantly helpful
+
+
+REVISED CONCLUSIONS:
+--------------------------------------------------------------------------------
+Multi-agent debate shows DATASET-SPECIFIC effects:
+
+✓ MCQ Datasets (MedQA, MMLU):
+  - Debate IMPROVES accuracy by 7-8%
+  - Beneficial for well-defined multiple-choice questions
+
+✗ PubMedQA (yes/no/maybe):
+  - Debate REDUCES decisive accuracy by ~35%
+  - BUT improves uncertainty detection (maybe recall +323%)
+  - Trade-off: decisive answers vs. uncertainty recognition
+
+★ Difficulty-Dependent:
+  - Most effective on genuinely hard questions
+  - Can introduce unnecessary doubt on easy questions
+
+================================================================================

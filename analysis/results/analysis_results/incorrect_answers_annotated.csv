@@ -1,0 +1,21 @@
+experiment_id,question_id,predicted,gold,error_type,reasoning,prompt_version,dataset,generator_answer,skeptic_challenged
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,23002947,maybe,no,Type 4,Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,pubmedqa,no,False
+pubmedqa_v1_baseline_20260317_223316_041167,23571528,unknown,no,"Type 1, Type 2",Generator initially gave wrong answer: B vs gold: no | Skeptic failed to challenge incorrect generator output,v1_baseline,pubmedqa,B,False
+medqa_v3_skeptic_strict_20260318_010349_523064,medqa_94,unknown,B,Unclear,Error type could not be determined from debate log,v3_skeptic_strict,medqa,unknown,False
+mmlu_v2_structured_20260317_233001_804634,mmlu_anatomy_29,B,C,"Type 1, Type 3, Type 4",Generator initially gave wrong answer: b vs gold: c | Skeptic raised concerns but Judge made wrong final decision | Evidence suggests question or gold label may be ambiguous,v2_structured,mmlu,b,True
+medqa_v3_skeptic_strict_20260318_003302_728197,medqa_68,unknown,A,Unclear,Error type could not be determined from debate log,v3_skeptic_strict,medqa,a,True
+medqa_v3_skeptic_strict_20260318_010349_523064,medqa_43,unknown,C,Type 4,Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,medqa,c,False
+mmlu_v3_skeptic_strict_20260317_233001_772569,mmlu_clinical_knowledge_75,unknown,D,"Type 1, Type 4",Generator initially gave wrong answer: D vs gold: d | Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,mmlu,D,True
+medqa_v3_skeptic_strict_20260318_010349_523064,medqa_4,D,B,Type 2,Skeptic failed to challenge incorrect generator output,v3_skeptic_strict,medqa,unknown,False
+mmlu_v2_structured_20260317_233001_804634,mmlu_professional_medicine_17,C,D,"Type 1, Type 3, Type 4",Generator initially gave wrong answer: c vs gold: d | Skeptic raised concerns but Judge made wrong final decision | Evidence suggests question or gold label may be ambiguous,v2_structured,mmlu,c,True
+medqa_v3_skeptic_strict_20260318_010349_523064,medqa_93,unknown,C,Type 4,Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,medqa,unknown,True
+medqa_v3_skeptic_strict_20260318_003302_728197,medqa_60,unknown,C,Type 4,Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,medqa,c,True
+mmlu_v3_skeptic_strict_20260318_010349_550985,mmlu_clinical_knowledge_91,unknown,D,Unclear,Error type could not be determined from debate log,v3_skeptic_strict,mmlu,unknown,False
+pubmedqa_v3_skeptic_strict_20260317_230113_154589,22534881,maybe,no,Type 1,Generator initially gave wrong answer: yes vs gold: no,v3_skeptic_strict,pubmedqa,yes,False
+pubmedqa_v3_skeptic_strict_20260318_012407_660127,10749257,maybe,yes,Unclear,Error type could not be determined from debate log,v3_skeptic_strict,pubmedqa,yes,False
+mmlu_v3_skeptic_strict_20260317_233001_772569,mmlu_anatomy_98,unknown,A,Unclear,Error type could not be determined from debate log,v3_skeptic_strict,mmlu,a,True
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,10966943,maybe,no,"Type 1, Type 4",Generator initially gave wrong answer: maybe vs gold: no | Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,pubmedqa,maybe,False
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,23379759,maybe,yes,"Type 1, Type 2",Generator initially gave wrong answer: maybe vs gold: yes | Skeptic failed to challenge incorrect generator output,v3_skeptic_strict,pubmedqa,maybe,False
+pubmedqa_v3_skeptic_strict_20260317_223316_053102,22534881,maybe,no,Type 3,Skeptic raised concerns but Judge made wrong final decision,v3_skeptic_strict,pubmedqa,no,True
+pubmedqa_v3_skeptic_strict_20260317_223316_053102,12163782,maybe,yes,"Type 1, Type 3, Type 4",Generator initially gave wrong answer: a vs gold: yes | Skeptic raised concerns but Judge made wrong final decision | Evidence suggests question or gold label may be ambiguous,v3_skeptic_strict,pubmedqa,a,True
+pubmedqa_v2_structured_20260317_225048_329041,25475395,maybe,yes,"Type 3, Type 4",Skeptic raised concerns but Judge made wrong final decision | Evidence suggests question or gold label may be ambiguous,v2_structured,pubmedqa,yes,True

@@ -1,0 +1,58 @@
+================================================================================
+LLM Council Experiment Analysis Summary
+================================================================================
+
+EXPERIMENT OVERVIEW
+--------------------------------------------------------------------------------
+Total experiments: 24
+Completed experiments: 24
+Models tested: meta-llama/llama-4-scout-17b-16e-instruct, llama-3.1-8b-instant, llama-3.3-70b-versatile, qwen/qwen3-32b
+Datasets: pubmedqa, mmlu, medqa
+Prompt versions: v3_skeptic_strict, v1_baseline, v2_structured, v1_cot
+Stages tested: [np.int64(1), np.int64(3)]
+
+Total questions evaluated: 2400
+
+KEY FINDINGS
+--------------------------------------------------------------------------------
+Average Accuracy:
+  1-stage: 0.7258
+  3-stage: 0.4217
+  Improvement: -41.91%
+
+Maybe Recall (PubMedQA):
+  1-stage: 0.1889
+  3-stage: 0.8000
+  Improvement: +323.53%
+
+STATISTICAL SIGNIFICANCE (p < 0.05):
+
+Token Usage:
+  1-stage average: 48349 tokens
+  3-stage average: 370111 tokens
+  Cost multiplier: 7.66x
+
+OUTPUT FILES GENERATED
+--------------------------------------------------------------------------------
+Statistical Analysis:
+  - statistical_tests.csv
+  - maybe_recall_analysis.csv
+  - results_table.tex
+
+Visualizations:
+  - maybe_recall_comparison.png
+  - accuracy_by_dataset.png
+  - accuracy_by_prompt.png
+  - f1_macro_comparison.png
+  - efficiency_plot.png
+  - token_usage.png
+  - confusion_matrix_*.png (per dataset/stage)
+
+Qualitative Analysis Samples:
+  - qualitative_sample_correct.csv
+  - qualitative_sample_incorrect.csv
+  - qualitative_sample_maybe_errors.csv
+
+================================================================================
+Analysis complete. Review output files for detailed results.
+================================================================================

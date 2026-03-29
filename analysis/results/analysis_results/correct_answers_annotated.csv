@@ -1,0 +1,21 @@
+experiment_id,question_id,predicted,gold,prompt_version,dataset,reasoning
+mmlu_v2_structured_20260317_233001_804634,mmlu_professional_medicine_8,D,D,v2_structured,mmlu,Error type could not be determined from debate log
+mmlu_v3_skeptic_strict_20260317_233001_772569,mmlu_professional_medicine_28,A,A,v3_skeptic_strict,mmlu,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,7547656,no,no,v1_baseline,pubmedqa,Error type could not be determined from debate log
+medqa_v2_structured_20260318_003302_758355,medqa_43,C,C,v2_structured,medqa,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,9488747,yes,yes,v1_baseline,pubmedqa,Error type could not be determined from debate log
+medqa_v2_structured_20260318_003302_758355,medqa_50,A,A,v2_structured,medqa,Error type could not be determined from debate log
+mmlu_v3_skeptic_strict_20260317_233001_772569,mmlu_clinical_knowledge_88,C,C,v3_skeptic_strict,mmlu,Error type could not be determined from debate log
+medqa_v3_skeptic_strict_20260318_003302_728197,medqa_48,A,A,v3_skeptic_strict,medqa,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,22504515,no,no,v1_baseline,pubmedqa,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,8921484,no,no,v1_baseline,pubmedqa,Error type could not be determined from debate log
+mmlu_v2_structured_20260317_233001_804634,mmlu_clinical_knowledge_59,C,C,v2_structured,mmlu,Error type could not be determined from debate log
+pubmedqa_v3_skeptic_strict_20260318_012407_660127,16392897,maybe,maybe,v3_skeptic_strict,pubmedqa,Error type could not be determined from debate log
+pubmedqa_v2_structured_20260317_225048_329041,11079675,yes,yes,v2_structured,pubmedqa,Error type could not be determined from debate log
+medqa_v2_structured_20260318_003302_758355,medqa_53,D,D,v2_structured,medqa,Error type could not be determined from debate log
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,24450673,no,no,v3_skeptic_strict,pubmedqa,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,21745056,yes,yes,v1_baseline,pubmedqa,Error type could not be determined from debate log
+medqa_v3_skeptic_strict_20260318_003302_728197,medqa_19,A,A,v3_skeptic_strict,medqa,Error type could not be determined from debate log
+pubmedqa_v2_structured_20260317_225048_329041,15943725,yes,yes,v2_structured,pubmedqa,Error type could not be determined from debate log
+mmlu_v2_structured_20260317_233001_804634,mmlu_clinical_knowledge_35,C,C,v2_structured,mmlu,Error type could not be determined from debate log
+pubmedqa_v1_baseline_20260317_223316_041167,27909738,no,no,v1_baseline,pubmedqa,Error type could not be determined from debate log

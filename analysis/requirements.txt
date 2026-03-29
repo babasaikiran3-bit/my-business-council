@@ -1,0 +1,16 @@
+# Python dependencies for multi-agent debate evaluation analysis
+
+# Data processing
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.6.0
+seaborn>=0.12.0
+
+# Statistical analysis
+scipy>=1.10.0
+scikit-learn>=1.2.0
+
+# Optional: For database operations (if sharing raw data)
+# sqlite3 is included in Python standard library

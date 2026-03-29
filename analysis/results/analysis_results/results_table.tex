@@ -1,0 +1,15 @@
+\begin{tabular}{llrrrr}
+\toprule
+ &  & accuracy & f1_macro & maybe_recall & total_tokens \\
+n_stages & prompt_version &  &  &  &  \\
+\midrule
+\multirow[t]{3}{*}{1} & v1_baseline & 0.704000 & 0.665000 & 0.283000 & 37968.375000 \\
+ & v1_cot & 0.800000 & 0.737000 & 0.000000 & 65433.667000 \\
+ & v2_structured & 0.680000 & 0.518000 & 0.000000 & 80135.000000 \\
+\cline{1-6}
+\multirow[t]{3}{*}{3} & v1_baseline & 0.700000 & 0.617000 & 0.200000 & 142705.000000 \\
+ & v2_structured & 0.717000 & 0.728000 & 0.933000 & 300997.667000 \\
+ & v3_skeptic_strict & 0.276000 & 0.313000 & 0.917000 & 424453.875000 \\
+\cline{1-6}
+\bottomrule
+\end{tabular}

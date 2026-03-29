@@ -1,0 +1,35 @@
+================================================================================
+Qualitative Analysis Summary (Section 6.3)
+================================================================================
+
+KEY FINDINGS:
+--------------------------------------------------------------------------------
+
+1. ERROR CATEGORIZATION:
+   - Type 1 (Generator error): 8 cases
+   - Type 2 (Skeptic failure): 3 cases
+   - Type 3 (Judge error): 5 cases
+   - Type 4 (Ambiguous Q/label): 10 cases
+
+2. v3_skeptic_strict PERFORMANCE:
+   - Type 1 errors caught: 5
+   - Skeptic challenge rate: 43.75% (incorrect answers)
+
+3. ACCURACY DROP CAUSE:
+   - Judge errors (Type 3) account for 25.0% of incorrect answers
+   - This suggests debate process introduces errors in final decision-making
+
+4. MAYBE RECALL PATTERN:
+   - Total maybe misclassifications: 15
+   - Most errors in: pubmedqa
+   - Common predictions when gold='maybe': no
+
+CONCLUSION:
+--------------------------------------------------------------------------------
+The multi-agent debate system shows:
+- Generator errors (Type 1) are most common, suggesting initial answer quality is critical
+- Judge errors (Type 3) contribute significantly to accuracy drop
+- v3_skeptic_strict increases challenge rate but may lead to over-caution
+- PubMedQA maybe recall improvement comes at cost of increased over-caution in other cases
+
+================================================================================

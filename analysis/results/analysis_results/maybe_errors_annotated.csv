@@ -1,0 +1,16 @@
+experiment_id,question_id,predicted,gold,error_type,reasoning,prompt_version,dataset,skeptic_challenged
+pubmedqa_v3_skeptic_strict_20260318_012407_660127,11867487,no,maybe,Type 2,Skeptic should have raised more uncertainty (gold was 'maybe'),v3_skeptic_strict,pubmedqa,False
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,25636371,no,maybe,Type 2,Skeptic should have raised more uncertainty (gold was 'maybe'),v3_skeptic_strict,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,11411430,unknown,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v2_structured_20260317_225048_329041,10340286,yes,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v2_structured,pubmedqa,True
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,25394614,no,maybe,Type 2,Skeptic should have raised more uncertainty (gold was 'maybe'),v3_skeptic_strict,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,16392897,yes,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,25394614,no,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,25571931,no,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,16816043,yes,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v3_skeptic_strict_20260317_230113_180022,26606599,yes,maybe,Type 2,Skeptic should have raised more uncertainty (gold was 'maybe'),v3_skeptic_strict,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,18403944,unknown,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,12790890,no,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v3_skeptic_strict_20260317_230113_154589,25394614,no,maybe,Type 2,Skeptic should have raised more uncertainty (gold was 'maybe'),v3_skeptic_strict,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,20197761,no,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
+pubmedqa_v1_baseline_20260317_223316_041167,20101129,no,maybe,Type 1,Generator/system failed to recognize inherent uncertainty,v1_baseline,pubmedqa,False
