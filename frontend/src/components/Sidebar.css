@@ -21,8 +21,8 @@
 .new-conversation-btn {
   width: 100%;
   padding: 10px;
-  background: #4a90e2;
-  border: 1px solid #4a90e2;
+  background: #ee00ff;
+  border: 1px solid #ee00ff;
   border-radius: 6px;
   color: #fff;
   cursor: pointer;
@@ -32,8 +32,8 @@
 }
 
 .new-conversation-btn:hover {
-  background: #357abd;
-  border-color: #357abd;
+  background: #cc00dd;
+  border-color: #cc00dd;
 }
 
 .conversation-list {
