@@ -67,6 +67,51 @@ export const api = {
   },
 
   /**
+   * Get available models.
+   */
+  async getModels() {
+    const response = await fetch(`${API_BASE}/api/models`);
+    if (!response.ok) throw new Error('Failed to get models');
+    return response.json();
+  },
+
+  /**
+   * Simple query: send prompt to selected models, optionally synthesize.
+   * @param {string} prompt
+   * @param {string[]} models
+   * @param {boolean} synthesize
+   * @param {function} onEvent - (eventType, data) => void
+   */
+  async simpleQueryStream(prompt, models, synthesize, onEvent) {
+    const response = await fetch(`${API_BASE}/api/simple-query/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, models, synthesize }),
+    });
+    if (!response.ok) throw new Error('Failed to run query');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            onEvent(event.type, event);
+          } catch (e) {
+            console.error('Failed to parse SSE event:', e);
+          }
+        }
+      }
+    }
+  },
+
+  /**
    * Send a message and receive streaming updates.
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content

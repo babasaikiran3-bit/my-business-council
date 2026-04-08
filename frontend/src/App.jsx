@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import QueryInterface from './components/QueryInterface';
 import { api } from './api';
 import './App.css';
 
 function App() {
+  const [mode, setMode] = useState('council'); // 'council' | 'query'
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
@@ -183,17 +185,38 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
-      />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-      />
+      <div className="mode-bar">
+        <button
+          className={`mode-tab ${mode === 'council' ? 'active' : ''}`}
+          onClick={() => setMode('council')}
+        >
+          Council
+        </button>
+        <button
+          className={`mode-tab ${mode === 'query' ? 'active' : ''}`}
+          onClick={() => setMode('query')}
+        >
+          Query
+        </button>
+      </div>
+
+      {mode === 'council' ? (
+        <>
+          <Sidebar
+            conversations={conversations}
+            currentConversationId={currentConversationId}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={handleNewConversation}
+          />
+          <ChatInterface
+            conversation={currentConversation}
+            onSendMessage={handleSendMessage}
+            isLoading={isLoading}
+          />
+        </>
+      ) : (
+        <QueryInterface />
+      )}
     </div>
   );
 }

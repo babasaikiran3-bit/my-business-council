@@ -11,6 +11,8 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .openrouter import query_models_parallel, query_model
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 app = FastAPI(title="LLM Council API")
 
@@ -191,6 +193,81 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
         }
+    )
+
+
+@app.get("/api/models")
+async def get_available_models():
+    """Return the list of available models."""
+    return {
+        "council_models": COUNCIL_MODELS,
+        "chairman_model": CHAIRMAN_MODEL,
+    }
+
+
+class SimpleQueryRequest(BaseModel):
+    """Request for a simple multi-model query."""
+    prompt: str
+    models: List[str]
+    synthesize: bool = False
+
+
+@app.post("/api/simple-query/stream")
+async def simple_query_stream(request: SimpleQueryRequest):
+    """
+    Query selected models in parallel, optionally synthesize with Claude.
+    Returns Server-Sent Events.
+    """
+    async def event_generator():
+        try:
+            yield f"data: {json.dumps({'type': 'responses_start'})}\n\n"
+
+            messages = [{"role": "user", "content": request.prompt}]
+            raw = await query_models_parallel(request.models, messages)
+
+            responses = [
+                {"model": model, "content": resp.get("content", "") if resp else None}
+                for model, resp in raw.items()
+            ]
+
+            yield f"data: {json.dumps({'type': 'responses_complete', 'data': responses})}\n\n"
+
+            if request.synthesize:
+                yield f"data: {json.dumps({'type': 'synthesis_start'})}\n\n"
+
+                successful = [r for r in responses if r["content"]]
+                if successful:
+                    responses_text = "\n\n".join(
+                        f"[{r['model']}]:\n{r['content']}" for r in successful
+                    )
+                    synthesis_prompt = f"""Multiple AI models answered the following question. Synthesize their answers into one clear, definitive response.
+
+Question: {request.prompt}
+
+Answers:
+{responses_text}
+
+Provide a single, well-reasoned answer that captures the best insights from all responses:"""
+
+                    synthesis_resp = await query_model(
+                        CHAIRMAN_MODEL,
+                        [{"role": "user", "content": synthesis_prompt}]
+                    )
+                    synthesis_content = synthesis_resp.get("content", "") if synthesis_resp else "Synthesis failed."
+                else:
+                    synthesis_content = "No successful model responses to synthesize."
+
+                yield f"data: {json.dumps({'type': 'synthesis_complete', 'model': CHAIRMAN_MODEL, 'content': synthesis_content})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
 
