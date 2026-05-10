@@ -1,8 +1,13 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+
+
+def is_successful_response(response: Optional[Dict[str, Any]]) -> bool:
+    """Return True when an OpenRouter response contains usable text."""
+    return bool(response and not response.get("error") and response.get("content"))
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
@@ -23,7 +28,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        if is_successful_response(response):  # Only include successful responses
             stage1_results.append({
                 "model": model,
                 "response": response.get('content', '')
@@ -100,7 +105,7 @@ Now provide your evaluation and ranking:"""
     # Format results
     stage2_results = []
     for model, response in responses.items():
-        if response is not None:
+        if is_successful_response(response):
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
@@ -158,20 +163,60 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
-    # Query the chairman model
+    # Query the chairman model. If it fails, try other successful council
+    # members before returning an error to the user.
     response = await query_model(CHAIRMAN_MODEL, messages)
+    if not is_successful_response(response):
+        fallback_result = await _try_fallback_chairmen(
+            messages,
+            stage1_results,
+            exclude_model=CHAIRMAN_MODEL,
+        )
+        if fallback_result:
+            return fallback_result
 
-    if response is None:
-        # Fallback if chairman fails
+        error_detail = response.get("error") if response else "No response returned."
         return {
             "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
+            "response": (
+                "Error: Unable to generate final synthesis.\n\n"
+                f"Chairman request failed for `{CHAIRMAN_MODEL}`: {error_detail}"
+            ),
+            "error": error_detail,
         }
 
     return {
         "model": CHAIRMAN_MODEL,
         "response": response.get('content', '')
     }
+
+
+async def _try_fallback_chairmen(
+    messages: List[Dict[str, str]],
+    stage1_results: List[Dict[str, Any]],
+    exclude_model: str,
+) -> Optional[Dict[str, Any]]:
+    """Try models that already succeeded in Stage 1 as synthesis fallbacks."""
+    fallback_models = [
+        result["model"]
+        for result in stage1_results
+        if result.get("model") and result["model"] != exclude_model
+    ]
+
+    for model in fallback_models:
+        response = await query_model(model, messages)
+        if is_successful_response(response):
+            return {
+                "model": model,
+                "response": (
+                    f"_Note: Chairman `{exclude_model}` failed, so `{model}` "
+                    "generated this final synthesis._\n\n"
+                    f"{response.get('content', '')}"
+                ),
+                "fallback_for": exclude_model,
+            }
+
+    return None
 
 
 def parse_ranking_from_text(ranking_text: str) -> List[str]:
