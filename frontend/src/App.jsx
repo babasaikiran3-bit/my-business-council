@@ -53,8 +53,37 @@ function App() {
     }
   };
 
+  const handleClearConversations = async () => {
+    if (!window.confirm('Clear all conversations? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await api.deleteAllConversations();
+      setConversations([]);
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+    } catch (error) {
+      console.error('Failed to clear conversations:', error);
+    }
+  };
+
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+  };
+
+  const handleDeleteConversation = async (id) => {
+    try {
+      await api.deleteConversation(id);
+      setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+
+      if (currentConversationId === id) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
   };
 
   const handleSendMessage = async (content) => {
@@ -188,6 +217,8 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onClearConversations={handleClearConversations}
+        onDeleteConversation={handleDeleteConversation}
       />
       <ChatInterface
         conversation={currentConversation}

@@ -5,6 +5,28 @@ from typing import List, Dict, Any, Optional
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 
 
+def _format_http_error(error: httpx.HTTPStatusError) -> str:
+    """Extract a concise OpenRouter error message from an HTTP failure."""
+    response = error.response
+    status = response.status_code
+
+    try:
+        data = response.json()
+    except ValueError:
+        body = response.text.strip()
+        if len(body) > 500:
+            body = body[:497] + "..."
+        return f"HTTP {status}: {body or response.reason_phrase}"
+
+    detail = data.get("error", data)
+    if isinstance(detail, dict):
+        message = detail.get("message") or detail.get("code") or str(detail)
+    else:
+        message = str(detail)
+
+    return f"HTTP {status}: {message}"
+
+
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
@@ -19,7 +41,8 @@ async def query_model(
         timeout: Request timeout in seconds
 
     Returns:
-        Response dict with 'content' and optional 'reasoning_details', or None if failed
+        Response dict with 'content' and optional 'reasoning_details'.
+        Failed requests return a dict with an 'error' key.
     """
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -48,9 +71,14 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.HTTPStatusError as e:
+        error = _format_http_error(e)
+        print(f"Error querying model {model}: {error}")
+        return {'content': None, 'error': error}
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
-        return None
+        error = f"{type(e).__name__}: {e}"
+        print(f"Error querying model {model}: {error}")
+        return {'content': None, 'error': error}
 
 
 async def query_models_parallel(
@@ -65,7 +93,8 @@ async def query_models_parallel(
         messages: List of message dicts to send to each model
 
     Returns:
-        Dict mapping model identifier to response dict (or None if failed)
+        Dict mapping model identifier to response dict.
+        Failed requests include an 'error' key.
     """
     import asyncio
 

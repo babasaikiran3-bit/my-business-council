@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import RankingHeatmap from './RankingHeatmap';
 import './Stage2.css';
 
 function deAnonymizeText(text, labelToModel) {
@@ -94,6 +95,8 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
           </div>
         </div>
       )}
+
+      <RankingHeatmap rankings={rankings} labelToModel={labelToModel} />
     </div>
   );
 }

@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -6,13 +5,37 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  onClearConversations,
+  onDeleteConversation,
 }) {
+  const handleDelete = (event, conversationId) => {
+    event.stopPropagation();
+
+    if (!window.confirm('Delete this conversation?')) {
+      return;
+    }
+
+    if (typeof onDeleteConversation === 'function') {
+      onDeleteConversation(conversationId);
+    }
+  };
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         <h1>LLM Council</h1>
         <button className="new-conversation-btn" onClick={onNewConversation}>
           + New Conversation
+        </button>
+        <button
+          className="clear-history-btn"
+          onClick={() => {
+            if (typeof onClearConversations === 'function') {
+              onClearConversations();
+            }
+          }}
+        >
+          Clear History
         </button>
       </div>
 
@@ -28,12 +51,21 @@ export default function Sidebar({
               }`}
               onClick={() => onSelectConversation(conv.id)}
             >
-              <div className="conversation-title">
-                {conv.title || 'New Conversation'}
+              <div className="conversation-info">
+                <div className="conversation-title">
+                  {conv.title || 'New Conversation'}
+                </div>
+                <div className="conversation-meta">
+                  {conv.message_count} messages
+                </div>
               </div>
-              <div className="conversation-meta">
-                {conv.message_count} messages
-              </div>
+              <button
+                className="delete-conversation-btn"
+                onClick={(event) => handleDelete(event, conv.id)}
+                title="Delete conversation"
+              >
+                ×
+              </button>
             </div>
           ))
         )}

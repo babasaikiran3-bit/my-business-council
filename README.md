@@ -2,49 +2,98 @@
 
 ![llmcouncil](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+LLM Council is a local web app that asks multiple large language models the same question, has them rank each other's answers anonymously, and then uses a chairman model to synthesize a final response.
 
-In a bit more detail, here is what happens when you submit a query:
+## What It Does
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+Each message runs through three stages:
 
-## Vibe Code Alert
+1. Stage 1 collects independent answers from each configured council model.
+1. Stage 2 anonymizes those answers as `Response A`, `Response B`, and so on, then asks the models to rank them.
+1. Stage 3 asks the chairman model to synthesize a final answer using the stage 1 responses and stage 2 rankings.
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+The UI exposes the full pipeline so you can inspect what happened instead of only seeing the final answer.
 
-## Setup
+## Current Features
 
-### 1. Install Dependencies
+- Tabbed stage 1 model responses.
+- Stage 2 raw peer evaluations, extracted rankings, aggregate rankings, and a ranking heatmap.
+- Stage 3 final synthesis with chairman attribution.
+- Copy buttons for user prompts, stage 1 responses, and the final answer.
+- Conversation title generation from the first user message.
+- Per-conversation delete and clear-history actions.
+- Chairman fallback when the configured chairman model fails during synthesis.
+- Optional Kubernetes deployment manifests with separate frontend and backend images.
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
+## Requirements
 
-**Backend:**
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 20+ and npm
+- An [OpenRouter](https://openrouter.ai/) API key
+
+## Quick Start
+
+### Install Dependencies
+
+Backend:
+
 ```bash
 uv sync
 ```
 
-**Frontend:**
+Frontend:
+
 ```bash
 cd frontend
 npm install
 cd ..
 ```
 
-### 2. Configure API Key
+### Configure Environment
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root. You can start from `.env.example`.
+
+```bash
+cp .env.example .env
+```
+
+Required variable:
 
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+The backend validates this at startup and will fail fast if it is missing.
 
-### 3. Configure Models (Optional)
+### Run Locally
 
-Edit `backend/config.py` to customize the council:
+Use the provided launcher:
+
+```bash
+./start.sh
+```
+
+Or run each service manually.
+
+Backend:
+
+```bash
+uv run python -m backend.main
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+## Configuration
+
+Edit [backend/config.py](backend/config.py) to change the council members, chairman model, or data directory.
 
 ```python
 COUNCIL_MODELS = [
@@ -55,33 +104,120 @@ COUNCIL_MODELS = [
 ]
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+DATA_DIR = "data/conversations"
 ```
 
-## Running the Application
+### Frontend API Base
 
-**Option 1: Use the start script**
-```bash
-./start.sh
-```
+Local development defaults to `http://localhost:8001`.
 
-**Option 2: Run manually**
+If you need the frontend to target a different backend, set `VITE_API_BASE` before building or running the frontend:
 
-Terminal 1 (Backend):
-```bash
-uv run python -m backend.main
-```
-
-Terminal 2 (Frontend):
 ```bash
 cd frontend
-npm run dev
+VITE_API_BASE=http://localhost:8001 npm run dev
 ```
 
-Then open http://localhost:5173 in your browser.
+In the production container, `VITE_API_BASE` is intentionally left empty so the frontend calls `/api/...` and lets Nginx proxy requests to the backend service.
 
-## Tech Stack
+## Project Layout
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+- [backend/](backend): FastAPI app, council orchestration, OpenRouter client, and JSON conversation storage.
+- [frontend/](frontend): React and Vite single-page app.
+- [k8s/](k8s): Kubernetes manifests and deployment notes.
+- [Dockerfile.backend](Dockerfile.backend): Backend image build.
+- [Dockerfile.frontend](Dockerfile.frontend): Frontend image build.
+
+## Backend API
+
+The backend entry point is [backend/main.py](backend/main.py).
+
+Routes:
+
+- `GET /`: health check
+- `GET /api/conversations`: list conversation metadata
+- `POST /api/conversations`: create a conversation
+- `DELETE /api/conversations`: clear all conversations
+- `GET /api/conversations/{conversation_id}`: load one conversation
+- `DELETE /api/conversations/{conversation_id}`: delete one conversation
+- `POST /api/conversations/{conversation_id}/message`: run the full council flow synchronously
+- `POST /api/conversations/{conversation_id}/message/stream`: stream stage progress as server-sent events
+
+Additional backend notes are in [backend/README.md](backend/README.md).
+
+## Frontend Notes
+
+The frontend renders each assistant message as a three-stage council transcript.
+
+- Stage 1 shows individual model tabs.
+- Stage 2 shows raw evaluations, parsed rankings, aggregate rankings, and the ranking heatmap.
+- Stage 3 shows the final chairman answer.
+
+Additional frontend notes are in [frontend/README.md](frontend/README.md).
+
+## Kubernetes
+
+This repo can run on Kubernetes as two workloads:
+
+- A FastAPI backend on port `8001`
+- An Nginx-served frontend on port `80`
+
+The frontend service proxies `/api/*` to the backend service, so the browser only needs to talk to one public origin.
+
+### Build and Push Images
+
+```bash
+docker build -f Dockerfile.backend -t ghcr.io/your-org/llm-council-backend:latest .
+docker build -f Dockerfile.frontend -t ghcr.io/your-org/llm-council-frontend:latest .
+
+docker push ghcr.io/your-org/llm-council-backend:latest
+docker push ghcr.io/your-org/llm-council-frontend:latest
+```
+
+### Deploy
+
+1. Update the image names in [k8s/llm-council.yaml](k8s/llm-council.yaml).
+1. Update the ingress host in [k8s/llm-council.yaml](k8s/llm-council.yaml).
+1. Create the secret:
+
+```bash
+kubectl create namespace llm-council
+kubectl create secret generic llm-council-secrets \
+  --namespace llm-council \
+  --from-literal=OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+1. Apply the manifest:
+
+```bash
+kubectl apply -f k8s/llm-council.yaml
+```
+
+Deployment details are documented in [k8s/README.md](k8s/README.md).
+
+## Limitations
+
+- Conversation storage is local JSON on disk, not a shared database.
+- Because of that storage model, the backend should stay at one replica unless you change persistence.
+- Model availability, latency, and pricing depend on OpenRouter and the configured model set.
+- The frontend uses server-sent events for streaming, so reverse proxies need buffering disabled for the streaming endpoint.
+
+## Troubleshooting
+
+### Missing API Key
+
+If the backend exits immediately with an `OPENROUTER_API_KEY is not set` error, create `.env` in the project root or export the variable before starting the backend.
+
+### Frontend Cannot Reach Backend
+
+For local development, verify the backend is running on port `8001` or override `VITE_API_BASE`.
+
+### Kubernetes Streaming Seems Stuck
+
+The ingress and Nginx template in this repo disable proxy buffering for `/api/`, which is required for the streaming endpoint. If you use a different ingress controller or proxy, make sure it also allows streaming responses.
+
+## Developer Docs
+
+- [backend/README.md](backend/README.md)
+- [frontend/README.md](frontend/README.md)
+- [k8s/README.md](k8s/README.md)

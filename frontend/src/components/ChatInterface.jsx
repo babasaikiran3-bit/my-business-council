@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import CopyButton from './CopyButton';
 import './ChatInterface.css';
 
 export default function ChatInterface({
@@ -67,6 +68,7 @@ export default function ChatInterface({
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   </div>
+                  <CopyButton text={msg.content} label="Copy message" />
                 </div>
               ) : (
                 <div className="assistant-message">

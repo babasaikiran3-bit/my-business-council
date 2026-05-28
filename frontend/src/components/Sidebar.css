@@ -36,6 +36,22 @@
   border-color: #357abd;
 }
 
+.clear-history-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #d9534f;
+  border-radius: 6px;
+  color: #d9534f;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.clear-history-btn:hover {
+  background: #fcebea;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
@@ -50,11 +66,42 @@
 }
 
 .conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px;
   margin-bottom: 4px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
+}
+
+.conversation-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.delete-conversation-btn {
+  flex-shrink: 0;
+  display: none;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: #999;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.conversation-item:hover .delete-conversation-btn {
+  display: block;
+}
+
+.delete-conversation-btn:hover {
+  background: #fde8e8;
+  color: #c0392b;
 }
 
 .conversation-item:hover {

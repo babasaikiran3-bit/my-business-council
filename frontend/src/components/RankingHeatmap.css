@@ -1,0 +1,108 @@
+.ranking-heatmap {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.ranking-heatmap h4 {
+  margin: 0 0 6px 0;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.heatmap-description {
+  margin: 0 0 14px 0;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.heatmap-table-wrapper {
+  overflow-x: auto;
+}
+
+.heatmap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.heatmap-corner {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  color: #888;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.heatmap-col-header,
+.heatmap-row-header {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  color: #444;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.heatmap-col-header {
+  text-align: center;
+}
+
+.heatmap-cell {
+  min-width: 60px;
+  border: 1px solid #ddd;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  text-align: center;
+}
+
+.heatmap-pos-1 {
+  background: #d4edda;
+  color: #155724;
+}
+
+.heatmap-pos-2 {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.heatmap-pos-3 {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.heatmap-pos-4,
+.heatmap-pos-5 {
+  background: #f1aeb5;
+  color: #58151c;
+}
+
+.heatmap-self {
+  background: #ececec;
+  color: #aaa;
+}
+
+.heatmap-unknown {
+  background: #fafafa;
+  color: #ccc;
+}
+
+.heatmap-avg-row {
+  border-top: 2px solid #bbb;
+}
+
+.heatmap-avg {
+  background: #eef4ff;
+  color: #2a7ae2;
+  font-family: monospace;
+}

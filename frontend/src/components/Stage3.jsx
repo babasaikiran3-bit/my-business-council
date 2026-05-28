@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown';
+import CopyButton from './CopyButton';
 import './Stage3.css';
 
 export default function Stage3({ finalResponse }) {
@@ -16,6 +17,7 @@ export default function Stage3({ finalResponse }) {
         <div className="final-text markdown-content">
           <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
         </div>
+        <CopyButton text={finalResponse.response} label="Copy response" />
       </div>
     </div>
   );

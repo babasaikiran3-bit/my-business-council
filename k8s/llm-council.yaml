@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-council
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-council-data
+  namespace: llm-council
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-council-backend
+  namespace: llm-council
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-council-backend
+  template:
+    metadata:
+      labels:
+        app: llm-council-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/your-org/llm-council-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+              name: http
+          env:
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-council-secrets
+                  key: OPENROUTER_API_KEY
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: conversation-data
+              mountPath: /app/data
+      volumes:
+        - name: conversation-data
+          persistentVolumeClaim:
+            claimName: llm-council-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-council-backend
+  namespace: llm-council
+spec:
+  selector:
+    app: llm-council-backend
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-council-frontend
+  namespace: llm-council
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-council-frontend
+  template:
+    metadata:
+      labels:
+        app: llm-council-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/your-org/llm-council-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: BACKEND_UPSTREAM
+              value: http://llm-council-backend:8001
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-council-frontend
+  namespace: llm-council
+spec:
+  selector:
+    app: llm-council-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llm-council
+  namespace: llm-council
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: llm-council.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: llm-council-frontend
+                port:
+                  number: 80
