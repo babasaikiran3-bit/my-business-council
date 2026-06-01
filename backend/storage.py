@@ -129,15 +129,17 @@ def add_user_message(conversation_id: str, content: str):
 
 def add_assistant_message(
     conversation_id: str,
+    stage0: Dict[str, Any],
     stage1: List[Dict[str, Any]],
     stage2: List[Dict[str, Any]],
     stage3: Dict[str, Any]
 ):
     """
-    Add an assistant message with all 3 stages to a conversation.
+    Add an assistant message with all stages to a conversation.
 
     Args:
         conversation_id: Conversation identifier
+        stage0: Evidence base (digest + sources) from the researcher
         stage1: List of individual model responses
         stage2: List of model rankings
         stage3: Final synthesized response
@@ -148,6 +150,7 @@ def add_assistant_message(
 
     conversation["messages"].append({
         "role": "assistant",
+        "stage0": stage0,
         "stage1": stage1,
         "stage2": stage2,
         "stage3": stage3

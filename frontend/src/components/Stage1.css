@@ -63,3 +63,30 @@
   color: #333;
   line-height: 1.6;
 }
+
+.source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.source-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  background: #f0f7ff;
+  border: 1px solid #d0e7ff;
+  border-radius: 12px;
+  color: #4a90e2;
+  font-size: 12px;
+  text-decoration: none;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-chip:hover {
+  background: #e3f0ff;
+  border-color: #4a90e2;
+}

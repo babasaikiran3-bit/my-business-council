@@ -1,9 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import Stage0 from './Stage0';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
+
+const AGE_OPTIONS = [
+  { label: 'Newborn (0-3mo)', value: 'newborn' },
+  { label: 'Infant (3-12mo)', value: 'infant' },
+  { label: 'Toddler (1-3yr)', value: 'toddler' },
+  { label: 'Older child', value: 'older' },
+];
 
 export default function ChatInterface({
   conversation,
@@ -11,6 +19,7 @@ export default function ChatInterface({
   isLoading,
 }) {
   const [input, setInput] = useState('');
+  const [ageValue, setAgeValue] = useState(AGE_OPTIONS[2].value);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -24,7 +33,11 @@ export default function ChatInterface({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input);
+      const ageLabel =
+        AGE_OPTIONS.find((opt) => opt.value === ageValue)?.label ||
+        AGE_OPTIONS[2].label;
+      const content = `Child age: ${ageLabel}. Question: ${input}`;
+      onSendMessage(content);
       setInput('');
     }
   };
@@ -37,12 +50,24 @@ export default function ChatInterface({
     }
   };
 
+  const safetyBanner = (
+    <div className="safety-banner" role="note">
+      ⚕️ General information from AI, based on cited medical sources — not a
+      diagnosis or a substitute for professional care. If your child may be in
+      danger, call your doctor or emergency services now.
+    </div>
+  );
+
   if (!conversation) {
     return (
       <div className="chat-interface">
+        {safetyBanner}
         <div className="empty-state">
-          <h2>Welcome to LLM Council</h2>
-          <p>Create a new conversation to get started</p>
+          <h2>Welcome to Parenting Roundtable</h2>
+          <p>
+            Science-backed parenting answers from a panel of AIs — with the
+            sources, so you don't have to keep searching at 2am.
+          </p>
         </div>
       </div>
     );
@@ -50,11 +75,15 @@ export default function ChatInterface({
 
   return (
     <div className="chat-interface">
+      {safetyBanner}
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
             <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <p>
+              Science-backed parenting answers from a panel of AIs — with the
+              sources, so you don't have to keep searching at 2am.
+            </p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -70,7 +99,21 @@ export default function ChatInterface({
                 </div>
               ) : (
                 <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
+                  <div className="message-label">Parenting Roundtable</div>
+
+                  {/* Stage 0 */}
+                  {msg.loading?.stage0 && (
+                    <div className="stage-loading">
+                      <div className="spinner"></div>
+                      <span>Consulting trusted medical sources...</span>
+                    </div>
+                  )}
+                  {msg.stage0 && (
+                    <Stage0
+                      evidenceBrief={msg.stage0?.evidence_brief}
+                      sources={msg.stage0?.sources}
+                    />
+                  )}
 
                   {/* Stage 1 */}
                   {msg.loading?.stage1 && (
@@ -113,7 +156,7 @@ export default function ChatInterface({
         {isLoading && (
           <div className="loading-indicator">
             <div className="spinner"></div>
-            <span>Consulting the council...</span>
+            <span>Consulting the roundtable...</span>
           </div>
         )}
 
@@ -122,15 +165,35 @@ export default function ChatInterface({
 
       {conversation.messages.length === 0 && (
         <form className="input-form" onSubmit={handleSubmit}>
-          <textarea
-            className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            rows={3}
-          />
+          <div className="input-main">
+            <div className="age-selector">
+              <label className="age-selector-label" htmlFor="child-age">
+                Child's age
+              </label>
+              <select
+                id="child-age"
+                className="age-select"
+                value={ageValue}
+                onChange={(e) => setAgeValue(e.target.value)}
+                disabled={isLoading}
+              >
+                {AGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              className="message-input"
+              placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              rows={3}
+            />
+          </div>
           <button
             type="submit"
             className="send-button"

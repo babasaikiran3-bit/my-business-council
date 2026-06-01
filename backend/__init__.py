@@ -1,1 +1,1 @@
-"""LLM Council backend package."""
+"""Parenting Roundtable backend package."""

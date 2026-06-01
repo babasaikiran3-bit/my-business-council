@@ -1,14 +1,19 @@
-# LLM Council
+# Parenting Roundtable
 
-![llmcouncil](header.jpg)
+![parenting roundtable](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+Born from a real 2am panic — an infant with a 38.1°C fever, parents Googling frantically, every result disagreeing, and a single LLM just regurgitating the internet. **Parenting Roundtable** is a local web app that answers pediatric/parenting questions by first gathering the *latest, scientifically-proven sources* and then having a panel of LLMs reason from that shared evidence. The goal: balanced, evidence-based answers **with the sources**, and a Chairman that is careful but decisive — safety first, then one clear action.
 
-In a bit more detail, here is what happens when you submit a query:
+The decisive difference from a generic multi-LLM tool is **Stage 0**: a dedicated source-of-truth web-search agent (Exa, restricted to a strict allowlist of trusted medical domains — AAP, WHO, CDC, NHS, Cochrane, PubMed, Mayo, …) runs *first*. Its real citations become the canonical **Sources**, and the council cites only those — no "citing from memory," no fabricated health links.
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+In a bit more detail, here is what happens when you submit a question (and your child's age):
+
+0. **Stage 0: Source of truth**. A single searcher model queries the web (Exa) restricted to trusted medical/scientific domains and produces a neutral, advice-free **evidence brief** plus a deduped, allowlist-filtered list of real **sources**.
+1. **Stage 1: First opinions**. Each council LLM answers the question grounded *only* in the Stage 0 evidence (no web access of its own), citing those real sources. Responses are shown in a tab view.
+2. **Stage 2: Review**. Each LLM ranks the others' (anonymized) answers on scientific accuracy, source quality, safety/red-flag handling, age-appropriateness, and clarity for a worried parent.
+3. **Stage 3: Final answer**. The Chairman synthesizes one careful-but-decisive answer — leading with a `> EMERGENCY:` callout when warranted (e.g. an infant under 3 months with a fever), explicit watch-wait vs. call-doctor vs. ER thresholds, and the consolidated, verified Sources.
+
+> ⚕️ This is general information from AI based on cited medical sources — not a diagnosis or a substitute for professional care. Safety is enforced primarily through prompts plus one deterministic backstop (newborn + fever → emergency callout); it is not a certified medical device.
 
 ## Vibe Code Alert
 
@@ -44,18 +49,25 @@ Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purcha
 
 ### 3. Configure Models (Optional)
 
-Edit `backend/config.py` to customize the council:
+Edit `backend/config.py` to customize the searcher, council, chairman, and trusted domains:
 
 ```python
+# Stage 0 researcher (web search). Perplexity Sonar is an alternative.
+SEARCH_MODEL = "openai/gpt-5.1"
+
 COUNCIL_MODELS = [
-    "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
     "anthropic/claude-sonnet-4.5",
     "x-ai/grok-4",
 ]
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+
+# Stage 0 web search is restricted to this allowlist of trusted medical domains.
+TRUSTED_DOMAINS = ["healthychildren.org", "aap.org", "who.int", "cdc.gov", "nhs.uk", ...]
 ```
+
+> Stage 0 uses OpenRouter's Exa web-search plugin (~$0.005/question) restricted to `TRUSTED_DOMAINS`. Citations are taken from the response `annotations` and allowlist-filtered server-side, so only trusted-domain URLs are ever shown.
 
 ## Running the Application
 
