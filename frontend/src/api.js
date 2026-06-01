@@ -9,7 +9,9 @@ export const api = {
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      credentials: 'include',
+    });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -22,6 +24,7 @@ export const api = {
   async createConversation() {
     const response = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -38,7 +41,8 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      { credentials: 'include' }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -54,6 +58,7 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/message`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -70,18 +75,20 @@ export const api = {
    * Send a message and receive streaming updates.
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content
+   * @param {number|null} ageDays - The child's age in days (typed; drives safety triage)
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent) {
+  async sendMessageStream(conversationId, content, ageDays, onEvent) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, age_days: ageDays }),
       }
     );
 
@@ -111,5 +118,66 @@ export const api = {
         }
       }
     }
+  },
+
+  // --- Phase 2: identity, child profiles, consent ---
+
+  async getAuthProviders() {
+    const r = await fetch(`${API_BASE}/api/auth/providers`, { credentials: 'include' });
+    return r.ok ? r.json() : {};
+  },
+
+  async getMe() {
+    const r = await fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' });
+    return r.ok ? r.json() : null;
+  },
+
+  loginUrl(provider) {
+    return `${API_BASE}/api/auth/${provider}/login`;
+  },
+
+  async logout() {
+    await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  },
+
+  async listChildren() {
+    const r = await fetch(`${API_BASE}/api/children`, { credentials: 'include' });
+    return r.ok ? r.json() : [];
+  },
+
+  async createChild(name, birthdate) {
+    const r = await fetch(`${API_BASE}/api/children`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, birthdate }),
+    });
+    if (!r.ok) throw new Error('Failed to create child');
+    return r.json();
+  },
+
+  async deleteChild(childId) {
+    await fetch(`${API_BASE}/api/children/${childId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+  },
+
+  async getConsents() {
+    const r = await fetch(`${API_BASE}/api/consents`, { credentials: 'include' });
+    return r.ok ? r.json() : null;
+  },
+
+  async recordConsents(kinds, version = '1.0') {
+    const r = await fetch(`${API_BASE}/api/consents`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kinds, version }),
+    });
+    return r.ok ? r.json() : null;
   },
 };

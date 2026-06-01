@@ -1,0 +1,83 @@
+.calm-progress {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 20px;
+  margin: 4px 0 8px;
+  background: linear-gradient(135deg, var(--rose-50), var(--surface-2));
+  border: 1px solid var(--rose-100);
+  border-radius: var(--r-lg);
+}
+
+.calm-progress-orb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, var(--rose-300), var(--rose-500));
+  color: #fff;
+  box-shadow: 0 0 0 0 rgba(222, 92, 134, 0.45);
+  animation: calm-breathe 2.4s var(--ease) infinite;
+}
+
+@keyframes calm-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(222, 92, 134, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(222, 92, 134, 0);
+    transform: scale(1.05);
+  }
+}
+
+.calm-progress-text {
+  min-width: 0;
+}
+
+.calm-progress-title {
+  display: flex;
+  align-items: center;
+  margin: 0 0 4px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.calm-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 4px;
+}
+
+.calm-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--rose-400);
+  animation: calm-bounce 1.2s ease-in-out infinite;
+}
+
+.calm-dots span:nth-child(2) { animation-delay: 0.15s; }
+.calm-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes calm-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+.calm-progress-tip {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  animation: tip-fade 0.5s var(--ease);
+}
+
+@keyframes tip-fade {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}

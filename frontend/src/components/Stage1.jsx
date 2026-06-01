@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { makeSafeMarkdownComponents } from './markdownComponents';
+import { Users } from './Icons';
 import './Stage1.css';
 
 export default function Stage1({ responses }) {
@@ -14,7 +15,10 @@ export default function Stage1({ responses }) {
 
   return (
     <div className="stage stage1">
-      <h3 className="stage-title">Stage 1: Individual Responses</h3>
+      <h3 className="stage-title">
+        <Users size={17} />
+        <span>패널 각자의 답변</span>
+      </h3>
 
       <div className="tabs">
         {responses.map((resp, index) => (

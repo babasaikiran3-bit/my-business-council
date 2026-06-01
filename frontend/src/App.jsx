@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import { Logo, Menu } from './components/Icons';
 import { api } from './api';
 import './App.css';
 
@@ -9,18 +10,9 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
+  const [user, setUser] = useState(null);
+  const [providers, setProviders] = useState({});
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const loadConversations = async () => {
     try {
@@ -40,6 +32,46 @@ function App() {
     }
   };
 
+  const loadAuth = async () => {
+    try {
+      const [me, prov] = await Promise.all([
+        api.getMe(),
+        api.getAuthProviders(),
+      ]);
+      setUser(me);
+      setProviders(prov);
+    } catch (error) {
+      console.error('Failed to load auth:', error);
+    }
+  };
+
+  // Load conversations + auth state on mount
+  useEffect(() => {
+    loadConversations();
+    loadAuth();
+    // After an OAuth redirect (?login=ok|error), clean the URL; loadAuth refreshes state.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('login')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // Load conversation details when selected
+  useEffect(() => {
+    if (currentConversationId) {
+      loadConversation(currentConversationId);
+    }
+  }, [currentConversationId]);
+
+  const handleLogin = (provider) => {
+    window.location.href = api.loginUrl(provider);
+  };
+
+  const handleLogout = async () => {
+    await api.logout();
+    await loadAuth();
+  };
+
   const handleNewConversation = async () => {
     try {
       const newConv = await api.createConversation();
@@ -48,6 +80,7 @@ function App() {
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      setSidebarOpen(false);
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -55,13 +88,26 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    setSidebarOpen(false);
   };
 
-  const handleSendMessage = async (content) => {
-    if (!currentConversationId) return;
-
+  const handleSendMessage = async (content, ageDays) => {
     setIsLoading(true);
     try {
+      // Auto-create a conversation on first send so a parent can just type and
+      // send from the welcome screen (no separate "new conversation" step).
+      let convId = currentConversationId;
+      if (!convId) {
+        const newConv = await api.createConversation();
+        convId = newConv.id;
+        setConversations((prev) => [
+          { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
+          ...prev,
+        ]);
+        setCurrentConversationId(newConv.id);
+        setCurrentConversation({ id: newConv.id, messages: [] });
+      }
+
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
       setCurrentConversation((prev) => ({
@@ -72,6 +118,7 @@ function App() {
       // Create a partial assistant message that will be updated progressively
       const assistantMessage = {
         role: 'assistant',
+        emergency: null,
         stage0: null,
         stage1: null,
         stage2: null,
@@ -92,8 +139,17 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(convId, content, ageDays, (eventType, event) => {
         switch (eventType) {
+          case 'emergency':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              lastMsg.emergency = event.data;
+              return { ...prev, messages };
+            });
+            break;
+
           case 'stage0_start':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
@@ -184,6 +240,14 @@ function App() {
 
           case 'error':
             console.error('Stream error:', event.message);
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg && lastMsg.role === 'assistant') {
+                lastMsg.error = event.message || true;
+              }
+              return { ...prev, messages };
+            });
             setIsLoading(false);
             break;
 
@@ -209,12 +273,38 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        user={user}
+        providers={providers}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
       />
+      <div className="main-col">
+        <div className="mobile-topbar">
+          <button
+            className="icon-button"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="메뉴 열기"
+          >
+            <Menu size={22} />
+          </button>
+          <div className="mobile-topbar-brand">
+            <Logo size={28} />
+            <span>부모 라운드테이블</span>
+          </div>
+        </div>
+        <ChatInterface
+          conversation={currentConversation}
+          onSendMessage={handleSendMessage}
+          isLoading={isLoading}
+        />
+      </div>
     </div>
   );
 }

@@ -1,8 +1,8 @@
 """Stage-based Parenting Roundtable orchestration."""
 
-import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 from .openrouter import query_models_parallel, query_model, extract_citations
+from .safety import apply_safety_net
 from .config import (
     COUNCIL_MODELS,
     CHAIRMAN_MODEL,
@@ -22,58 +22,6 @@ def _format_sources_list(sources: List[Dict[str, str]]) -> str:
         f"{i}. {src.get('title') or src.get('url')} — {src.get('url')}"
         for i, src in enumerate(sources, start=1)
     )
-
-
-# --- Deterministic safety backstop -------------------------------------------
-# Safety is primarily prompt-based, but we add ONE narrow, universally-agreed
-# deterministic rule as a last line of defense: any fever in a baby under 3
-# months old is a medical emergency (AAP/NHS/CDC). If the structured age says
-# newborn (0-3mo) and the question mentions fever, we guarantee an EMERGENCY
-# callout even if the LLM forgets to lead with one. Kept intentionally narrow to
-# avoid false positives.
-
-_EMERGENCY_BLOCKQUOTE_RE = re.compile(r"^\s*>?\s*\**\s*EMERGENCY\b", re.IGNORECASE | re.MULTILINE)
-
-NEWBORN_FEVER_EMERGENCY = (
-    "> EMERGENCY: A fever in a baby under 3 months old is a medical emergency. "
-    "Contact a doctor immediately or go to the nearest emergency department now — "
-    "do not wait. Babies this young can become seriously ill very quickly, even "
-    "when they look well."
-)
-
-
-def _is_newborn(user_query: str) -> bool:
-    """Detect a newborn (0-3 month) child from the query/age prefix."""
-    q = user_query.lower()
-    return any(
-        marker in q
-        for marker in ("newborn", "0-3mo", "0-3 mo", "under 3 month", "under three month")
-    )
-
-
-def _mentions_fever(user_query: str) -> bool:
-    """Detect a fever mention, including an explicit high temperature value."""
-    q = user_query.lower()
-    if any(k in q for k in ("fever", "febrile", "temperature", "high temp")):
-        return True
-    m = re.search(r"(\d{2,3}(?:\.\d)?)\s*°?\s*([cf])\b", q)
-    if m:
-        value = float(m.group(1))
-        unit = m.group(2)
-        if unit == "c" and value >= 38.0:
-            return True
-        if unit == "f" and value >= 100.4:
-            return True
-    return False
-
-
-def _apply_safety_net(response_text: str, user_query: str) -> str:
-    """Prepend a canonical EMERGENCY callout for the newborn-fever red flag if missing."""
-    text = response_text or ""
-    if _is_newborn(user_query) and _mentions_fever(user_query):
-        if not _EMERGENCY_BLOCKQUOTE_RE.search(text):
-            return f"{NEWBORN_FEVER_EMERGENCY}\n\n{text}"
-    return text
 
 
 async def stage0_research(user_query: str) -> Dict[str, Any]:
@@ -247,7 +195,8 @@ async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
-    stage0: Dict[str, Any]
+    stage0: Dict[str, Any],
+    age_days: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -321,8 +270,8 @@ Now write the final answer for the parent:"""
             "sources": []
         }
 
-    # Deterministic backstop: guarantee the newborn-fever emergency callout.
-    final_text = _apply_safety_net(response.get('content', ''), user_query)
+    # Deterministic backstop (typed age) + code-enforced Korean disclaimer.
+    final_text = apply_safety_net(response.get('content', ''), age_days, user_query)
 
     return {
         "model": CHAIRMAN_MODEL,
@@ -450,12 +399,16 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[Dict, List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    age_days: Optional[int] = None
+) -> Tuple[Dict, List, List, Dict, Dict]:
     """
     Run the complete staged council process.
 
     Args:
         user_query: The user's question
+        age_days: The child's age in days (typed; drives the deterministic safety net)
 
     Returns:
         Tuple of (stage0, stage1_results, stage2_results, stage3_result, metadata)
@@ -485,7 +438,8 @@ async def run_full_council(user_query: str) -> Tuple[Dict, List, List, Dict, Dic
         user_query,
         stage1_results,
         stage2_results,
-        stage0
+        stage0,
+        age_days
     )
 
     # Prepare metadata

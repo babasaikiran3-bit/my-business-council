@@ -1,11 +1,7 @@
-.stage0 {
-  background: #f7f9fc;
-  border-color: #d9e2ec;
-}
-
 .stage0-toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   width: 100%;
   padding: 0;
@@ -15,43 +11,48 @@
   text-align: left;
 }
 
-.stage0-toggle-icon {
-  color: #4a90e2;
-  font-size: 14px;
-  line-height: 1;
-}
-
 .stage0-title {
   margin: 0;
 }
 
+.stage0-chevron {
+  color: var(--ink-3);
+  flex-shrink: 0;
+  transition: transform 0.2s var(--ease);
+}
+
+.stage0-chevron.open {
+  transform: rotate(180deg);
+}
+
 .stage0-body {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .evidence-brief {
-  color: #333;
-  line-height: 1.6;
-  background: #ffffff;
+  color: var(--ink);
+  line-height: 1.7;
+  background: var(--surface);
   padding: 16px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  font-size: 14.5px;
 }
 
 .stage0-sources {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .stage0-sources-title {
   margin: 0 0 8px 0;
-  color: #333;
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
 }
 
 .source-list {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 18px;
 }
 
 .source-item {
@@ -60,7 +61,7 @@
 }
 
 .source-item a {
-  color: #4a90e2;
+  color: var(--sage-600);
   text-decoration: none;
   word-break: break-word;
 }

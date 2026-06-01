@@ -1,7 +1,70 @@
+/* Pretendard — the de-facto premium Korean product typeface (dynamic subset,
+   covers Latin beautifully too). Loaded by the browser at runtime. */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  /* ---- Brand: warm rose (nurturing — the audience is mostly moms) ---- */
+  --rose-50:  #FFF1F5;
+  --rose-100: #FFE3EC;
+  --rose-200: #FBCEDD;
+  --rose-300: #F4A9C2;
+  --rose-400: #EC7FA3;
+  --rose-500: #DE5C86;
+  --rose-600: #C9426E;
+  --rose-700: #A8305A;
+
+  /* ---- Trust: sage/emerald (the verified answer + sources) ---- */
+  --sage-50:  #EBF7F0;
+  --sage-100: #D5EEE0;
+  --sage-200: #AEDDC6;
+  --sage-500: #2E9E6E;
+  --sage-600: #218A5E;
+  --sage-700: #1A6E4B;
+
+  /* ---- Emergency (reserved — only red in the product) ---- */
+  --alert:    #C0392B;
+  --alert-700:#9E2D22;
+  --alert-bg: #FCEDEB;
+
+  /* ---- Warm neutrals ---- */
+  --ink:      #382B28;  /* primary text — warm near-black (~12:1 on white) */
+  --ink-2:    #69544F;  /* secondary text (~5.6:1) */
+  --ink-3:    #8A7873;  /* muted/meta — large or non-essential only */
+  --line:     #F1E6E0;  /* hairline border */
+  --line-2:   #E7D6CE;  /* stronger border */
+  --bg:       #FFF9F6;  /* app background — warm off-white */
+  --surface:  #FFFFFF;  /* cards */
+  --surface-2:#FFF4EF;  /* warm tinted surface */
+  --surface-3:#FCEEF3;  /* rose-tinted surface (user bubble) */
+
+  /* ---- Kakao / Naver brand ---- */
+  --kakao:    #FEE500;
+  --kakao-ink:#191600;
+  --naver:    #03C75A;
+
+  /* ---- Radii ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ---- Soft, warm-tinted shadows ---- */
+  --shadow-sm: 0 1px 2px rgba(86, 44, 56, 0.06), 0 1px 3px rgba(86, 44, 56, 0.05);
+  --shadow-md: 0 6px 18px rgba(120, 60, 80, 0.09);
+  --shadow-lg: 0 18px 44px rgba(120, 60, 80, 0.14);
+  --shadow-rose: 0 10px 24px rgba(201, 66, 110, 0.28);
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --font-sans: 'Pretendard Variable', Pretendard, system-ui, -apple-system,
+    BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI', Roboto, sans-serif;
+
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
+  color: var(--ink);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -18,19 +81,48 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
-  background: #f5f5f5;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
-  height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
 
-/* Global markdown styling */
+/* Accessible focus — visible warm ring, never removed */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(222, 92, 134, 0.35);
+  border-radius: var(--r-sm);
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Global markdown styling (warm, readable) ---------- */
 .markdown-content {
-  padding: 12px;
+  color: var(--ink);
+  line-height: 1.7;
+  font-size: 15px;
 }
 
 .markdown-content p {
@@ -47,7 +139,10 @@ body {
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  margin: 16px 0 8px 0;
+  margin: 20px 0 8px 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
 }
 
 .markdown-content h1:first-child,
@@ -62,26 +157,45 @@ body {
 .markdown-content ul,
 .markdown-content ol {
   margin: 0 0 12px 0;
-  padding-left: 24px;
+  padding-left: 22px;
 }
 
 .markdown-content li {
-  margin: 4px 0;
+  margin: 6px 0;
+}
+
+.markdown-content li::marker {
+  color: var(--rose-400);
+}
+
+.markdown-content strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.markdown-content a {
+  color: var(--sage-600);
+  text-decoration: none;
+  border-bottom: 1px solid var(--sage-200);
+}
+
+.markdown-content a:hover {
+  border-bottom-color: var(--sage-600);
 }
 
 .markdown-content pre {
-  background: #f5f5f5;
+  background: var(--surface-2);
   padding: 12px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   overflow-x: auto;
   margin: 0 0 12px 0;
 }
 
 .markdown-content code {
-  background: #f5f5f5;
+  background: var(--surface-2);
   padding: 2px 6px;
-  border-radius: 3px;
-  font-family: monospace;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
 }
 
@@ -91,16 +205,54 @@ body {
 }
 
 .markdown-content blockquote {
-  margin: 0 0 12px 0;
-  padding-left: 16px;
-  border-left: 4px solid #ddd;
-  color: #666;
+  margin: 14px 0;
+  padding: 10px 16px;
+  border-left: 3px solid var(--line-2);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  color: var(--ink-2);
 }
 
-/* A model-authored link that did not match a verified source: shown as plain,
+/* A model-authored link that did not match a verified source: rendered as plain,
    non-clickable text so a fabricated URL can never be followed. */
 .blocked-link {
   color: inherit;
   text-decoration: none;
-  border-bottom: 1px dotted #c0c0c0;
+  border-bottom: 1px dotted var(--line-2);
+}
+
+::selection {
+  background: var(--rose-200);
+  color: var(--ink);
+}
+
+/* Warm, slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--rose-200);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

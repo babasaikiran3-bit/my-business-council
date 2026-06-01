@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { makeSafeMarkdownComponents } from './markdownComponents';
+import { ChevronDown, BookOpen } from './Icons';
 import './Stage0.css';
 
 export default function Stage0({ evidenceBrief, sources }) {
@@ -20,10 +21,14 @@ export default function Stage0({ evidenceBrief, sources }) {
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
       >
-        <span className="stage0-toggle-icon">{open ? '▾' : '▸'}</span>
         <span className="stage-title stage0-title">
-          Sources consulted · Evidence base
+          <BookOpen size={17} />
+          <span>확인한 자료 · 근거 요약</span>
         </span>
+        <ChevronDown
+          size={18}
+          className={`stage0-chevron ${open ? 'open' : ''}`}
+        />
       </button>
 
       {open && (
@@ -38,7 +43,7 @@ export default function Stage0({ evidenceBrief, sources }) {
 
           {hasSources && (
             <div className="stage0-sources">
-              <h4 className="stage0-sources-title">Consulted sources</h4>
+              <h4 className="stage0-sources-title">확인한 출처</h4>
               <ul className="source-list">
                 {sources.map((source, index) => (
                   <li key={index} className="source-item">

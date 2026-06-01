@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { BadgeCheck } from './Icons';
 import './Stage2.css';
 
 function deAnonymizeText(text, labelToModel) {
@@ -23,12 +24,15 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <h3 className="stage-title">
+        <BadgeCheck size={17} />
+        <span>패널 상호 평가</span>
+      </h3>
 
-      <h4>Raw Evaluations</h4>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
-        Below, model names are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
+        각 모델이 모든 답변을 익명(답변 A·B·C)으로 평가하고 순위를 매겼어요.
+        아래에서는 읽기 쉽도록 <strong>실제 모델명</strong>을 굵게 표시했지만, 평가 당시에는
+        서로 누구인지 몰랐습니다.
       </p>
 
       <div className="tabs">
@@ -44,9 +48,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
       </div>
 
       <div className="tab-content">
-        <div className="ranking-model">
-          {rankings[activeTab].model}
-        </div>
+        <div className="ranking-model">{rankings[activeTab].model}</div>
         <div className="ranking-content markdown-content">
           <ReactMarkdown>
             {deAnonymizeText(rankings[activeTab].ranking, labelToModel)}
@@ -54,27 +56,27 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
         </div>
 
         {rankings[activeTab].parsed_ranking &&
-         rankings[activeTab].parsed_ranking.length > 0 && (
-          <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
-            <ol>
-              {rankings[activeTab].parsed_ranking.map((label, i) => (
-                <li key={i}>
-                  {labelToModel && labelToModel[label]
-                    ? labelToModel[label].split('/')[1] || labelToModel[label]
-                    : label}
-                </li>
-              ))}
-            </ol>
-          </div>
-        )}
+          rankings[activeTab].parsed_ranking.length > 0 && (
+            <div className="parsed-ranking">
+              <strong>추출된 순위</strong>
+              <ol>
+                {rankings[activeTab].parsed_ranking.map((label, i) => (
+                  <li key={i}>
+                    {labelToModel && labelToModel[label]
+                      ? labelToModel[label].split('/')[1] || labelToModel[label]
+                      : label}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
       </div>
 
       {aggregateRankings && aggregateRankings.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
+          <h4>종합 순위</h4>
           <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
+            모든 상호 평가를 합산한 결과예요 (점수가 낮을수록 높은 평가).
           </p>
           <div className="aggregate-list">
             {aggregateRankings.map((agg, index) => (
@@ -84,11 +86,9 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
                   {agg.model.split('/')[1] || agg.model}
                 </span>
                 <span className="rank-score">
-                  Avg: {agg.average_rank.toFixed(2)}
+                  평균 {agg.average_rank.toFixed(2)}
                 </span>
-                <span className="rank-count">
-                  ({agg.rankings_count} votes)
-                </span>
+                <span className="rank-count">({agg.rankings_count}표)</span>
               </div>
             ))}
           </div>
