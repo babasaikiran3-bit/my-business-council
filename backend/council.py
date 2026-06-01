@@ -1,5 +1,8 @@
 """Stage-based Parenting Roundtable orchestration."""
 
+import asyncio
+import logging
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from .openrouter import query_models_parallel, query_model, extract_citations
 from .safety import apply_safety_net
@@ -11,7 +14,29 @@ from .config import (
     SEARCH_SYSTEM_PROMPT,
     STAGE1_SYSTEM_PROMPT,
     STAGE3_CHAIRMAN_PROMPT,
+    STAGE0_TIMEOUT,
+    STAGE1_TIMEOUT,
+    STAGE2_TIMEOUT,
+    STAGE3_TIMEOUT,
 )
+
+logger = logging.getLogger("parenting_roundtable.council")
+
+
+async def _timed_stage(name: str, timeout: float, coro):
+    """Run a stage coroutine under a hard timeout, logging entry/exit + duration.
+
+    Raises asyncio.TimeoutError on overrun (callers persist a partial + surface a generic
+    error). The timeout is the orchestration cap; query_model has its own httpx timeout.
+    """
+    start = time.monotonic()
+    try:
+        result = await asyncio.wait_for(coro, timeout=timeout)
+        logger.info("stage complete", extra={"stage": name, "duration_s": round(time.monotonic() - start, 2)})
+        return result
+    except asyncio.TimeoutError:
+        logger.warning("stage timed out", extra={"stage": name, "timeout_s": timeout})
+        raise
 
 
 def _format_sources_list(sources: List[Dict[str, str]]) -> str:
@@ -271,7 +296,10 @@ Now write the final answer for the parent:"""
         }
 
     # Deterministic backstop (typed age) + code-enforced Korean disclaimer.
-    final_text = apply_safety_net(response.get('content', ''), age_days, user_query)
+    raw_text = response.get('content', '')
+    final_text = apply_safety_net(raw_text, age_days, user_query)
+    if final_text != raw_text:
+        logger.info("safety net adjusted final answer", extra={"age_days": age_days})
 
     return {
         "model": CHAIRMAN_MODEL,
@@ -414,10 +442,12 @@ async def run_full_council(
         Tuple of (stage0, stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 0: Build the shared evidence base via web search
-    stage0 = await stage0_research(user_query)
+    stage0 = await _timed_stage("stage0", STAGE0_TIMEOUT, stage0_research(user_query))
 
     # Stage 1: Collect individual responses grounded in the evidence base
-    stage1_results = await stage1_collect_responses(user_query, stage0)
+    stage1_results = await _timed_stage(
+        "stage1", STAGE1_TIMEOUT, stage1_collect_responses(user_query, stage0)
+    )
 
     # If no models responded successfully, return error (still return stage0)
     if not stage1_results:
@@ -428,18 +458,17 @@ async def run_full_council(
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await _timed_stage(
+        "stage2", STAGE2_TIMEOUT, stage2_collect_rankings(user_query, stage1_results)
+    )
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
-    stage3_result = await stage3_synthesize_final(
-        user_query,
-        stage1_results,
-        stage2_results,
-        stage0,
-        age_days
+    stage3_result = await _timed_stage(
+        "stage3", STAGE3_TIMEOUT,
+        stage3_synthesize_final(user_query, stage1_results, stage2_results, stage0, age_days),
     )
 
     # Prepare metadata

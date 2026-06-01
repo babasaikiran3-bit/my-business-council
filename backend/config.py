@@ -25,8 +25,73 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Data directory for conversation storage
-DATA_DIR = "data/conversations"
+# --- Deployment environment --------------------------------------------------
+# "dev" (default) keeps the local-developer ergonomics (relaxed cookies, ephemeral
+# secret fallback). "production" turns on the security floor: Secure/SameSite=None
+# cookies, HSTS, fail-fast on a missing SESSION_SECRET, and strict CORS validation.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "dev").strip().lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+# Data directory for conversation storage. In production this MUST point at a
+# mounted persistent disk (e.g. /data/conversations) — a PaaS ephemeral filesystem
+# loses every runtime write on redeploy/restart, silently defeating WS-3 durability.
+DATA_DIR = os.getenv("DATA_DIR", "data/conversations")
+
+# --- CORS (env-driven; credentialed mode requires explicit origins) ----------
+# Comma-separated list. Browsers reject `*` together with credentials, so the
+# value must be concrete origins. Validated at startup (see validate_runtime_config).
+CORS_ORIGINS = [o.strip() for o in os.getenv(
+    "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+).split(",") if o.strip()]
+
+# Where the SPA lives — used to build OAuth post-login redirects. Validated at startup.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# --- CSRF: custom header required on state-changing requests -----------------
+# SameSite=None (needed for the cross-site Vercel<->PaaS topology) removes SameSite's
+# CSRF protection, so we require a custom header the SPA sets and a cross-site attacker
+# page cannot set without a CORS preflight the strict allowlist rejects.
+CSRF_HEADER = "x-requested-with"
+CSRF_HEADER_VALUE = "parenting-roundtable"
+
+# --- Request size + cost/abuse knobs (env-driven; generous pilot defaults) ----
+MAX_REQUEST_BYTES = int(os.getenv("MAX_REQUEST_BYTES", str(200_000)))
+MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "5000"))
+RATE_LIMIT_MESSAGES = os.getenv("RATE_LIMIT_MESSAGES", "10/minute")
+RATE_LIMIT_AUTH = os.getenv("RATE_LIMIT_AUTH", "30/minute")
+QUOTA_DAILY_MESSAGES = int(os.getenv("QUOTA_DAILY_MESSAGES", "50"))
+
+# --- Orchestration timeouts (seconds). Per-stage caps sum to < pipeline cap so the
+# per-stage caps are the primary early-exit gate and the pipeline cap is a backstop.
+STAGE0_TIMEOUT = float(os.getenv("STAGE0_TIMEOUT", "60"))
+STAGE1_TIMEOUT = float(os.getenv("STAGE1_TIMEOUT", "90"))
+STAGE2_TIMEOUT = float(os.getenv("STAGE2_TIMEOUT", "90"))
+STAGE3_TIMEOUT = float(os.getenv("STAGE3_TIMEOUT", "90"))
+TITLE_TIMEOUT = float(os.getenv("TITLE_TIMEOUT", "30"))
+PIPELINE_TIMEOUT = float(os.getenv("PIPELINE_TIMEOUT", "360"))
+
+# --- Logging -----------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+
+
+def validate_runtime_config() -> None:
+    """Fail fast on misconfiguration that would silently break production.
+
+    Called once at app startup (backend.main). In production an empty / all-localhost /
+    wildcard CORS list means the credentialed cross-site frontend can never reach the
+    backend (or cookies are silently dropped), so we refuse to start rather than serve a
+    broken or insecure deployment.
+    """
+    if not IS_PRODUCTION:
+        return
+    localhost_only = all(("localhost" in o or "127.0.0.1" in o) for o in CORS_ORIGINS)
+    if not CORS_ORIGINS or localhost_only:
+        raise SystemExit(
+            "CORS_ORIGINS must list the production frontend origin(s) in production "
+            "(got: %r)" % (CORS_ORIGINS,)
+        )
+    if any(o == "*" for o in CORS_ORIGINS):
+        raise SystemExit("CORS_ORIGINS cannot be '*' with credentialed CORS — list explicit origins")
 
 # Trusted medical/scientific domains the Stage 0 searcher is restricted to.
 # Korean authorities come FIRST (primary market) and take precedence on conflict;

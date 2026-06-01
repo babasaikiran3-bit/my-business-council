@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync deps (incl. dev)
+        run: uv sync --frozen --group dev
+      - name: Lint (ruff)
+        run: uvx ruff check backend/ tests/ test_openrouter.py
+      - name: Compile
+        run: uv run python -m py_compile backend/*.py test_openrouter.py
+      - name: Tests (no live API key — integration tests auto-skip)
+        run: uv run pytest -q
+        # NB: OPENROUTER_API_KEY is intentionally NOT provided here.
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

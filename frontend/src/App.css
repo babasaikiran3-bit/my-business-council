@@ -20,6 +20,36 @@
   height: 100dvh;
 }
 
+/* Transient, dismissible banner for background failures (network / auth / login). */
+.app-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--alert-bg, #fdecec);
+  border-bottom: 1px solid #f0c9c9;
+  color: var(--alert-700, #a23b3b);
+  font-size: 14px;
+}
+
+.app-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-banner button {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* Mobile top bar — only shown on small screens; holds the drawer toggle + brand. */
 .mobile-topbar {
   display: none;

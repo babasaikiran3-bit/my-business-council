@@ -12,12 +12,15 @@ disabled and login 404s, so the app runs fine before credentials exist.
 
 import base64
 import hashlib
+import logging
 import os
 import secrets
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import httpx
+
+logger = logging.getLogger("parenting_roundtable.oauth")
 
 
 def _parse_kakao(data: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -129,7 +132,7 @@ async def exchange_code(
             resp.raise_for_status()
             return resp.json().get("access_token")
     except Exception as e:  # noqa: BLE001 - graceful degradation on any failure
-        print(f"OAuth token exchange failed for {provider}: {e}")
+        logger.warning("OAuth token exchange failed", extra={"provider": provider, "error": str(e)})
         return None
 
 
@@ -145,7 +148,7 @@ async def fetch_userinfo(provider: str, access_token: str) -> Optional[Dict[str,
             resp.raise_for_status()
             parsed = cfg["parse"](resp.json())
     except Exception as e:  # noqa: BLE001
-        print(f"OAuth userinfo fetch failed for {provider}: {e}")
+        logger.warning("OAuth userinfo fetch failed", extra={"provider": provider, "error": str(e)})
         return None
     if not parsed.get("provider_user_id") or parsed["provider_user_id"] == "None":
         return None

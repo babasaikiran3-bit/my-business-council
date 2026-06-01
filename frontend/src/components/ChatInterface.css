@@ -99,12 +99,38 @@
 }
 
 .answer-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   padding: 14px 16px;
   background: var(--alert-bg);
   border: 1px solid #f0c9c9;
   border-radius: var(--r-md);
   color: var(--alert-700);
   font-size: 14px;
+}
+
+.retry-button {
+  flex: none;
+  padding: 7px 14px;
+  background: #fff;
+  border: 1px solid #e0aaaa;
+  border-radius: var(--r-sm, 8px);
+  color: var(--alert-700);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.retry-button:hover:not(:disabled) {
+  background: var(--alert-bg);
+}
+
+.retry-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ---------- Welcome / empty state ---------- */

@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+frontend
+data
+tests
+.omc
+.context
+.env
+*.md
+header.jpg

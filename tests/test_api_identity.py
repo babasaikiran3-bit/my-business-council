@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.accounts import AccountStore, REQUIRED_CONSENTS
 
+# State-changing requests must carry the SPA's CSRF header (SameSite=None topology).
+CSRF = {"X-Requested-With": "parenting-roundtable"}
+
 
 def _patch_accounts(tmp_path, monkeypatch):
     monkeypatch.setattr("backend.main.accounts", AccountStore(str(tmp_path)))
@@ -23,7 +26,7 @@ def test_providers_disabled_by_default(tmp_path, monkeypatch):
 def test_children_crud_and_isolation(tmp_path, monkeypatch):
     _patch_accounts(tmp_path, monkeypatch)
     c1 = TestClient(app)
-    r = c1.post("/api/children", json={"name": "아기", "birthdate": "2024-06-01"})
+    r = c1.post("/api/children", json={"name": "아기", "birthdate": "2024-06-01"}, headers=CSRF)
     assert r.status_code == 200
     child = r.json()
     assert child["age_days"] is not None
@@ -33,17 +36,24 @@ def test_children_crud_and_isolation(tmp_path, monkeypatch):
     assert c2.get("/api/children").json() == []
 
 
+def test_child_create_requires_csrf_header(tmp_path, monkeypatch):
+    _patch_accounts(tmp_path, monkeypatch)
+    c = TestClient(app)
+    # Without the CSRF header the state-changing POST is rejected.
+    assert c.post("/api/children", json={"name": "아기", "birthdate": "2024-06-01"}).status_code == 403
+
+
 def test_child_bad_birthdate_rejected(tmp_path, monkeypatch):
     _patch_accounts(tmp_path, monkeypatch)
     c = TestClient(app)
-    assert c.post("/api/children", json={"name": "x", "birthdate": "nope"}).status_code == 400
+    assert c.post("/api/children", json={"name": "x", "birthdate": "nope"}, headers=CSRF).status_code == 400
 
 
 def test_consents_endpoint(tmp_path, monkeypatch):
     _patch_accounts(tmp_path, monkeypatch)
     c = TestClient(app)
     assert c.get("/api/consents").json()["has_required"] is False
-    r = c.post("/api/consents", json={"kinds": REQUIRED_CONSENTS, "version": "1.0"})
+    r = c.post("/api/consents", json={"kinds": REQUIRED_CONSENTS, "version": "1.0"}, headers=CSRF)
     assert r.json()["has_required"] is True
 
 
@@ -57,7 +67,10 @@ def test_login_404_when_provider_disabled(tmp_path, monkeypatch):
 def test_me_anonymous(tmp_path, monkeypatch):
     _patch_accounts(tmp_path, monkeypatch)
     me = TestClient(app).get("/api/auth/me").json()
-    assert me["authenticated"] is False and me["providers"] == []
+    # Anonymous sessions get a minimal shape — no account/consent fields leaked.
+    assert me["authenticated"] is False
+    assert "has_required_consents" not in me
+    assert me.get("providers", []) == []
 
 
 def test_callback_links_identity_in_place(tmp_path, monkeypatch):

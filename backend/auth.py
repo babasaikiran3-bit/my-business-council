@@ -15,15 +15,67 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import secrets
 import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import Request, Response
 
-SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-insecure-secret-change-me")
+from .config import IS_PRODUCTION
+
+logger = logging.getLogger("parenting_roundtable.auth")
+
+# The old insecure default. Treated as "unset" so a forgotten override fails closed.
+_DEV_PLACEHOLDER_SECRET = "dev-insecure-secret-change-me"
+_MIN_SECRET_LEN = 32
+
+
+def _load_session_secret(raw: Optional[str], is_production: bool) -> str:
+    """Resolve the HMAC signing secret, failing fast on an insecure production value.
+
+    Pure + parameterised so it is directly unit-testable (test_auth.py).
+    - Valid (set, not the placeholder, >=32 chars) -> use it.
+    - Invalid in production -> SystemExit (refuse to forge-able-session our way into prod).
+    - Invalid in dev -> ephemeral per-process secret + warning, so local dev / CI without
+      the env var still runs (sessions just don't survive a restart, which is fine in dev).
+    """
+    if raw and raw != _DEV_PLACEHOLDER_SECRET and len(raw) >= _MIN_SECRET_LEN:
+        return raw
+    if is_production:
+        raise SystemExit(
+            "SESSION_SECRET must be set to a random value of at least "
+            f"{_MIN_SECRET_LEN} characters in production "
+            '(generate: python -c "import secrets;print(secrets.token_urlsafe(32))")'
+        )
+    logger.warning(
+        "SESSION_SECRET is unset/insecure; using an ephemeral per-process secret "
+        "(dev only — sessions will not survive a restart)."
+    )
+    return secrets.token_urlsafe(48)
+
+
+SESSION_SECRET = _load_session_secret(os.getenv("SESSION_SECRET"), IS_PRODUCTION)
 COOKIE_NAME = "pr_uid"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 365  # 1 year
+
+
+def cookie_security_kwargs() -> Dict[str, Any]:
+    """Cookie security flags for the current environment.
+
+    Production runs cross-site (Vercel frontend <-> PaaS backend), so the session cookie
+    must be SameSite=None to be sent on credentialed fetches — which browsers only accept
+    together with Secure. Dev stays SameSite=Lax without Secure for http://localhost.
+    """
+    if IS_PRODUCTION:
+        return {"httponly": True, "secure": True, "samesite": "none"}
+    return {"httponly": True, "secure": False, "samesite": "lax"}
+
+
+def cookie_clear_kwargs() -> Dict[str, Any]:
+    flags = cookie_security_kwargs()
+    return {"secure": flags["secure"], "samesite": flags["samesite"]}
 
 
 def _sign(user_id: str) -> str:
@@ -47,13 +99,12 @@ def set_session_cookie(response: Response, user_id: str) -> None:
         COOKIE_NAME,
         _sign(user_id),
         max_age=COOKIE_MAX_AGE,
-        httponly=True,
-        samesite="lax",
+        **cookie_security_kwargs(),
     )
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, samesite="lax")
+    response.delete_cookie(COOKIE_NAME, **cookie_clear_kwargs())
 
 
 def sign_payload(payload: Dict[str, Any]) -> str:

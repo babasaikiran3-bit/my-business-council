@@ -12,8 +12,8 @@ The OAuth identity links to the caller's EXISTING (anonymous) ``user_id`` on fir
 sign-in — merge-in-place — so anonymous history is preserved, per the consensus plan.
 """
 
+import asyncio
 import hashlib
-import json
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import DATA_DIR
+from .storage_backend import (
+    KeyedLocks,
+    StorageCorruptionError,
+    _atomic_write_json,
+    _read_json_or_quarantine,
+)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 KST = timezone(timedelta(hours=9))
@@ -54,6 +60,8 @@ def age_days_from_birthdate(birthdate_iso: str, today: Optional[date] = None) ->
 class AccountStore:
     def __init__(self, data_dir: str = DATA_DIR):
         self.base = Path(data_dir)
+        # Per-key locks: account:<user_id> and identity:<provider>:<id>.
+        self._lock_for = KeyedLocks()
 
     # --- paths ---
     def _account_path(self, user_id: str) -> Path:
@@ -72,14 +80,15 @@ class AccountStore:
         path = self._account_path(user_id)
         if not path.exists():
             return None
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            return _read_json_or_quarantine(path)
+        except StorageCorruptionError:
+            # A corrupt account file is treated as "no account" (recoverable: a fresh
+            # OAuth login re-links). Never 500 the auth surface on it.
+            return None
 
     def _save_account(self, account: Dict[str, Any]) -> None:
-        path = self._account_path(account["user_id"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(account, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(self._account_path(account["user_id"]), account)
 
     def ensure_account(self, user_id: str) -> Dict[str, Any]:
         account = self.get_account(user_id)
@@ -104,10 +113,12 @@ class AccountStore:
         path = self._identity_path(provider, provider_user_id)
         if not path.exists():
             return None
-        with open(path, "r") as f:
-            return json.load(f).get("user_id")
+        try:
+            return _read_json_or_quarantine(path).get("user_id")
+        except StorageCorruptionError:
+            return None
 
-    def link_identity(
+    async def link_identity(
         self, current_user_id: str, provider: str, provider_user_id: str,
         display_name: Optional[str] = None,
     ) -> str:
@@ -116,26 +127,33 @@ class AccountStore:
         - If the identity already maps to an account → return THAT user_id (returning login).
         - Otherwise → attach it to the caller's current (anonymous) account and return it,
           so the caller's existing history carries over.
+
+        Serialised on the IDENTITY key (not user_id): the real race is two concurrent
+        first-logins for the SAME provider identity (different anon sessions) both creating
+        the index. We re-check inside the lock and write the account BEFORE the identity
+        index, so a crash leaves at worst a missing index (re-linkable) — never an index
+        pointing at an account that never recorded the provider.
         """
-        existing = self.find_user_by_identity(provider, provider_user_id)
-        if existing:
-            return existing
+        ident_key = f"identity:{provider}:{provider_user_id}"
+        async with self._lock_for(ident_key):
+            existing = self.find_user_by_identity(provider, provider_user_id)
+            if existing:
+                return existing
 
-        account = self.ensure_account(current_user_id)
-        if not any(p["provider"] == provider for p in account["providers"]):
-            account["providers"].append({"provider": provider, "provider_user_id": provider_user_id})
-        if display_name and not account.get("display_name"):
-            account["display_name"] = display_name
-        self._save_account(account)
+            async with self._lock_for(f"account:{current_user_id}"):
+                account = self.ensure_account(current_user_id)
+                if not any(p["provider"] == provider for p in account["providers"]):
+                    account["providers"].append({"provider": provider, "provider_user_id": provider_user_id})
+                if display_name and not account.get("display_name"):
+                    account["display_name"] = display_name
+                await asyncio.to_thread(self._save_account, account)
 
-        idpath = self._identity_path(provider, provider_user_id)
-        idpath.parent.mkdir(parents=True, exist_ok=True)
-        with open(idpath, "w") as f:
-            json.dump(
+            await asyncio.to_thread(
+                _atomic_write_json,
+                self._identity_path(provider, provider_user_id),
                 {"user_id": current_user_id, "provider": provider, "provider_user_id": provider_user_id},
-                f, indent=2, ensure_ascii=False,
             )
-        return current_user_id
+            return current_user_id
 
     # --- child profiles ---
     def list_children(self, user_id: str) -> List[Dict[str, Any]]:
@@ -148,38 +166,43 @@ class AccountStore:
                 return child
         return None
 
-    def add_child(self, user_id: str, name: str, birthdate: str) -> Dict[str, Any]:
+    async def add_child(self, user_id: str, name: str, birthdate: str) -> Dict[str, Any]:
         name = (name or "").strip()
-        if not name or len(name) > 40:
+        # Reject empty, over-long, or control-character names (the latter can break
+        # downstream rendering/logging and is never a legitimate child name).
+        if not name or len(name) > 40 or any(ord(c) < 32 for c in name):
             raise ValueError("invalid name")
         if age_days_from_birthdate(birthdate) is None:
             raise ValueError("invalid birthdate")
-        account = self.ensure_account(user_id)
-        child = {"id": uuid.uuid4().hex, "name": name, "birthdate": birthdate}
-        account["children"].append(child)
-        self._save_account(account)
+        async with self._lock_for(f"account:{user_id}"):
+            account = self.ensure_account(user_id)
+            child = {"id": uuid.uuid4().hex, "name": name, "birthdate": birthdate}
+            account["children"].append(child)
+            await asyncio.to_thread(self._save_account, account)
         return child
 
-    def delete_child(self, user_id: str, child_id: str) -> bool:
-        account = self.get_account(user_id)
-        if not account:
-            return False
-        before = len(account["children"])
-        account["children"] = [c for c in account["children"] if c["id"] != child_id]
-        if len(account["children"]) == before:
-            return False
-        self._save_account(account)
+    async def delete_child(self, user_id: str, child_id: str) -> bool:
+        async with self._lock_for(f"account:{user_id}"):
+            account = self.get_account(user_id)
+            if not account:
+                return False
+            before = len(account["children"])
+            account["children"] = [c for c in account["children"] if c["id"] != child_id]
+            if len(account["children"]) == before:
+                return False
+            await asyncio.to_thread(self._save_account, account)
         return True
 
     # --- consents ---
-    def record_consents(self, user_id: str, kinds: List[str], version: str) -> Dict[str, Any]:
-        account = self.ensure_account(user_id)
-        now = _utcnow_iso()
-        for kind in kinds:
-            if kind in ALL_CONSENTS:
-                account["consents"][kind] = {"version": version, "granted_at": now}
-        self._save_account(account)
-        return account["consents"]
+    async def record_consents(self, user_id: str, kinds: List[str], version: str) -> Dict[str, Any]:
+        async with self._lock_for(f"account:{user_id}"):
+            account = self.ensure_account(user_id)
+            now = _utcnow_iso()
+            for kind in kinds:
+                if kind in ALL_CONSENTS:
+                    account["consents"][kind] = {"version": version, "granted_at": now}
+            await asyncio.to_thread(self._save_account, account)
+            return account["consents"]
 
     def get_consents(self, user_id: str) -> Dict[str, Any]:
         account = self.get_account(user_id)

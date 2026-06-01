@@ -1,36 +1,174 @@
 """FastAPI backend for Parenting Roundtable."""
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, RedirectResponse
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
-import os
-import json
 import asyncio
+import json
+import logging
+import os
 import secrets
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
-from .storage_backend import store
-from .accounts import accounts, age_days_from_birthdate, ALL_CONSENTS, REQUIRED_CONSENTS
-from . import oauth
-from . import auth
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from . import auth, oauth
+from .accounts import ALL_CONSENTS, REQUIRED_CONSENTS, accounts, age_days_from_birthdate
 from .auth import get_current_user
-from .council import run_full_council, generate_conversation_title, stage0_research, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
-from .safety import assess_emergency, KO_DISCLAIMER
+from .config import (
+    CORS_ORIGINS,
+    CSRF_HEADER,
+    CSRF_HEADER_VALUE,
+    FRONTEND_URL,
+    IS_PRODUCTION,
+    MAX_MESSAGE_CHARS,
+    MAX_REQUEST_BYTES,
+    OPENROUTER_API_KEY,
+    PIPELINE_TIMEOUT,
+    RATE_LIMIT_AUTH,
+    RATE_LIMIT_MESSAGES,
+    STAGE0_TIMEOUT,
+    STAGE1_TIMEOUT,
+    STAGE2_TIMEOUT,
+    STAGE3_TIMEOUT,
+    TITLE_TIMEOUT,
+    DATA_DIR,
+    validate_runtime_config,
+)
+from .council import (
+    calculate_aggregate_rankings,
+    generate_conversation_title,
+    run_full_council,
+    stage0_research,
+    stage1_collect_responses,
+    stage2_collect_rankings,
+    stage3_synthesize_final,
+)
+from .logging_config import configure_logging, trace_id_var
+from .quota import quota
+from .safety import KO_DISCLAIMER, assess_emergency
+from .storage_backend import StorageCorruptionError, store
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+configure_logging()
+logger = logging.getLogger("parenting_roundtable.main")
+
 OAUTH_COOKIE = "pr_oauth"
 
-app = FastAPI(title="Parenting Roundtable API")
+# In production every message maps to a real (logged-in) account, so a single user can't
+# bypass the daily quota by dropping their cookie to mint a fresh anon id. Overridable for
+# local dev / tests where OAuth providers aren't configured.
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH_FOR_MESSAGES", "true" if IS_PRODUCTION else "false").lower() in (
+    "1", "true", "yes",
+)
 
-# Enable CORS for local development
+# User-facing, non-leaky messages (never expose str(exception) to the client).
+GENERIC_ERROR_KO = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+INCOMPLETE_KO = "답변 생성이 중간에 중단되었어요. 잠시 후 다시 시도해 주세요."
+
+
+def _validate_frontend_url() -> None:
+    """In production the OAuth post-login redirect target must be an allowlisted https origin."""
+    if not IS_PRODUCTION:
+        return
+    parsed = urlparse(FRONTEND_URL)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if parsed.scheme != "https" or origin not in CORS_ORIGINS:
+        raise SystemExit(
+            f"FRONTEND_URL ({FRONTEND_URL!r}) must be an https origin present in CORS_ORIGINS in production"
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_runtime_config()
+    _validate_frontend_url()
+    for provider in oauth.PROVIDERS:
+        if oauth.provider_enabled(provider):
+            cfg = oauth.provider_config(provider)
+            redirect_uri = os.getenv(cfg["redirect_uri_env"], "")
+            if IS_PRODUCTION and not redirect_uri.startswith("https://"):
+                raise SystemExit(f"{provider} redirect_uri must be https in production")
+            logger.info("oauth provider enabled", extra={"provider": provider, "redirect_uri": redirect_uri})
+    logger.info("startup", extra={"environment": "production" if IS_PRODUCTION else "dev",
+                                  "data_dir": os.path.abspath(DATA_DIR), "require_auth": REQUIRE_AUTH})
+    yield
+    logger.info("draining")  # graceful shutdown: in-flight SSE generators persist on close
+
+
+app = FastAPI(title="Parenting Roundtable API", lifespan=lifespan)
+
+
+# --- Rate limiting (slowapi; in-memory, single-worker — daily quota is the hard ceiling) ---
+def _rate_key(request: Request) -> str:
+    """Key limits on the signed user_id when present, else the client IP (pre-mint/anon)."""
+    uid = auth._verify(request.cookies.get(auth.COOKIE_NAME))
+    return uid or get_remote_address(request)
+
+
+# headers_enabled=True so the 429 carries Retry-After (+ X-RateLimit-*) for clients.
+limiter = Limiter(key_func=_rate_key, headers_enabled=True)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(StorageCorruptionError)
+async def _storage_corruption_handler(request: Request, exc: StorageCorruptionError):
+    logger.error("storage corruption", extra={"path": str(exc)})
+    return JSONResponse(status_code=500, content={"detail": GENERIC_ERROR_KO})
+
+
+# --- CORS (env-driven, credentialed; explicit headers because '*' is invalid with creds) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Requested-With", "X-Request-ID"],
 )
+
+
+@app.middleware("http")
+async def trace_size_and_security_headers(request: Request, call_next):
+    # Trace id: propagate an inbound X-Request-ID or mint one; echo it back.
+    trace = request.headers.get("x-request-id") or uuid.uuid4().hex
+    token = trace_id_var.set(trace)
+    try:
+        # Best-effort size cap: trusts the Content-Length header (a chunked client could
+        # understate it). Sufficient for a trusted pilot; the Pydantic max_length on message
+        # content is the authoritative guard for the hot path.
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > MAX_REQUEST_BYTES:
+            return JSONResponse(status_code=413, content={"detail": "Request too large"})
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = trace
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if IS_PRODUCTION:
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+    finally:
+        trace_id_var.reset(token)
+
+
+# --- Shared dependencies -----------------------------------------------------
+def require_csrf(request: Request) -> None:
+    """Reject state-changing requests lacking the SPA's custom header (CSRF defense)."""
+    if request.headers.get(CSRF_HEADER) != CSRF_HEADER_VALUE:
+        raise HTTPException(status_code=403, detail="Missing or invalid CSRF header")
+
+
+def require_authenticated_user(user_id: str = Depends(get_current_user)) -> str:
+    """Like get_current_user, but 401s anonymous callers when REQUIRE_AUTH is on (production)."""
+    if REQUIRE_AUTH and not accounts.is_authenticated(user_id):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user_id
 
 
 class CreateConversationRequest(BaseModel):
@@ -40,24 +178,25 @@ class CreateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
-    content: str
+    content: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS)
     # Typed child age in days — drives the deterministic safety triage/backstop.
-    # Optional for backward compatibility; the keyword red-flags fire regardless,
-    # and the newborn-fever rule needs this typed value (never the prompt string).
-    age_days: Optional[int] = None
+    age_days: Optional[int] = Field(None, ge=0, le=12000)
     # When set, age_days is derived server-side from this saved child's birthdate.
     child_profile_id: Optional[str] = None
+    # Client-generated per-send UUID: a repeat with the same key replays the stored
+    # answer instead of re-running ~8 paid LLM calls (double-charge / double-submit guard).
+    idempotency_key: Optional[str] = None
 
 
-def _resolve_age_days(user_id: str, request: "SendMessageRequest") -> Optional[int]:
+def _resolve_age_days(user_id: str, payload: "SendMessageRequest") -> Optional[int]:
     """Prefer a saved child profile's birthdate-derived age; fall back to the typed age."""
-    if request.child_profile_id:
-        child = accounts.get_child(user_id, request.child_profile_id)
+    if payload.child_profile_id:
+        child = accounts.get_child(user_id, payload.child_profile_id)
         if child:
             derived = age_days_from_birthdate(child["birthdate"])
             if derived is not None:
                 return derived
-    return request.age_days
+    return payload.age_days
 
 
 def _emergency_stage3(triage: Dict[str, Any]) -> Dict[str, Any]:
@@ -73,8 +212,46 @@ def _emergency_stage3(triage: Dict[str, Any]) -> Dict[str, Any]:
 _EMPTY_STAGE0 = {"evidence_brief": "", "sources": []}
 
 
+def _find_assistant_by_idempotency(conversation: Dict[str, Any], key: str) -> Optional[Dict[str, Any]]:
+    if not key:
+        return None
+    for msg in reversed(conversation.get("messages", [])):
+        if msg.get("role") == "assistant" and msg.get("idempotency_key") == key:
+            return msg
+    return None
+
+
+async def _persist_partial(
+    user_id: str, conversation_id: str,
+    stage0: Optional[Dict[str, Any]], stage1: Optional[List[Dict[str, Any]]],
+    stage2: Optional[List[Dict[str, Any]]], idempotency_key: Optional[str] = None,
+) -> None:
+    """Persist whatever stages completed plus an 'incomplete' note, marked short_circuit.
+
+    On reload the parent keeps the Stage 0/1 they already saw via SSE; the empty later
+    stages are skipped (no broken empty panels) because the message is short_circuit.
+    """
+    note = {"model": "incomplete", "response": INCOMPLETE_KO, "sources": []}
+    await store.append_assistant_message(
+        user_id, conversation_id,
+        stage0 or _EMPTY_STAGE0, stage1 or [], stage2 or [], note,
+        short_circuit=True, idempotency_key=idempotency_key,
+    )
+
+
+def _data_dir_writable() -> bool:
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        probe = os.path.join(DATA_DIR, f".readyprobe.{uuid.uuid4().hex}")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
 class ConversationMetadata(BaseModel):
-    """Conversation metadata for list view."""
     id: str
     created_at: str
     title: str
@@ -82,22 +259,40 @@ class ConversationMetadata(BaseModel):
 
 
 class Conversation(BaseModel):
-    """Full conversation with all messages."""
     id: str
     created_at: str
     title: str
     messages: List[Dict[str, Any]]
 
 
+# --- Health / readiness ------------------------------------------------------
 @app.get("/")
 async def root():
-    """Health check endpoint."""
     return {"status": "ok", "service": "Parenting Roundtable API"}
 
 
+@app.get("/health")
+async def health():
+    """Liveness: always 200 if the process is up (PaaS health target)."""
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    """Readiness: 200 only if the key is present, the secret is valid, and DATA_DIR is
+    writable (directly verifies the WS-3 persistent-disk requirement). Makes NO LLM call."""
+    checks = {
+        "api_key": bool(OPENROUTER_API_KEY),
+        "session_secret": bool(auth.SESSION_SECRET),
+        "data_dir_writable": _data_dir_writable(),
+    }
+    ok = all(checks.values())
+    return JSONResponse(status_code=200 if ok else 503, content={"ready": ok, "checks": checks})
+
+
+# --- Conversations -----------------------------------------------------------
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
 async def list_conversations(user_id: str = Depends(get_current_user)):
-    """List the current user's conversations (metadata only)."""
     return store.list_conversations(user_id)
 
 
@@ -106,23 +301,31 @@ async def create_conversation(
     request: CreateConversationRequest,
     user_id: str = Depends(get_current_user),
 ):
-    """Create a new conversation owned by the current user."""
     return store.create_conversation(user_id)
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
 async def get_conversation(conversation_id: str, user_id: str = Depends(get_current_user)):
-    """Get one of the current user's conversations with all its messages."""
     conversation = store.get_conversation(user_id, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    user_id: str = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
+    if not await store.delete_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # Identity: OAuth login (Kakao primary, Naver ready), session, profiles, consent
 # ---------------------------------------------------------------------------
-
 class ChildCreate(BaseModel):
     name: str
     birthdate: str  # YYYY-MM-DD
@@ -138,14 +341,16 @@ def _child_with_age(child: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/auth/providers")
-async def auth_providers():
-    """Which OAuth providers are configured (so the UI shows only working buttons)."""
+@limiter.limit(RATE_LIMIT_AUTH)
+async def auth_providers(request: Request, response: Response):
     return {p: oauth.provider_enabled(p) for p in oauth.PROVIDERS}
 
 
 @app.get("/api/auth/{provider}/login")
-async def auth_login(provider: str, user_id: str = Depends(get_current_user)):
-    """Start the OAuth dance: set a short-lived signed state+PKCE cookie, then redirect."""
+@limiter.limit(RATE_LIMIT_AUTH)
+async def auth_login(
+    provider: str, request: Request, response: Response, user_id: str = Depends(get_current_user)
+):
     if not oauth.provider_enabled(provider):
         raise HTTPException(status_code=404, detail="Provider not configured")
     cfg = oauth.provider_config(provider)
@@ -158,7 +363,7 @@ async def auth_login(provider: str, user_id: str = Depends(get_current_user)):
         code_challenge = pkce["challenge"]
     redirect = RedirectResponse(oauth.build_authorize_url(provider, state, code_challenge), status_code=302)
     auth.set_session_cookie(redirect, user_id)  # carry the current (anon) session forward
-    redirect.set_cookie(OAUTH_COOKIE, auth.sign_payload(payload), max_age=600, httponly=True, samesite="lax")
+    redirect.set_cookie(OAUTH_COOKIE, auth.sign_payload(payload), max_age=600, **auth.cookie_security_kwargs())
     return redirect
 
 
@@ -173,8 +378,10 @@ async def auth_callback(
     """Finish OAuth: verify state (CSRF), exchange code, link identity in place, set session."""
     saved = auth.verify_payload(request.cookies.get(OAUTH_COOKIE))
     fail = RedirectResponse(f"{FRONTEND_URL}/?login=error", status_code=302)
-    fail.delete_cookie(OAUTH_COOKIE, samesite="lax")
-    if not saved or saved.get("provider") != provider or not state or saved.get("state") != state:
+    fail.delete_cookie(OAUTH_COOKIE, **auth.cookie_clear_kwargs())
+    if not saved or saved.get("provider") != provider or not state or not secrets.compare_digest(
+        str(saved.get("state", "")), state
+    ):
         return fail  # state/CSRF mismatch
     token = await oauth.exchange_code(provider, code, state, saved.get("verifier"))
     if not token:
@@ -182,19 +389,22 @@ async def auth_callback(
     info = await oauth.fetch_userinfo(provider, token)
     if not info:
         return fail
-    resolved = accounts.link_identity(user_id, provider, info["provider_user_id"], info.get("display_name"))
+    resolved = await accounts.link_identity(user_id, provider, info["provider_user_id"], info.get("display_name"))
     ok = RedirectResponse(f"{FRONTEND_URL}/?login=ok", status_code=302)
     auth.set_session_cookie(ok, resolved)
-    ok.delete_cookie(OAUTH_COOKIE, samesite="lax")
+    ok.delete_cookie(OAUTH_COOKIE, **auth.cookie_clear_kwargs())
     return ok
 
 
 @app.get("/api/auth/me")
 async def auth_me(user_id: str = Depends(get_current_user)):
+    if not accounts.is_authenticated(user_id):
+        # Don't leak account/consent shape to an anonymous session.
+        return {"user_id": user_id, "authenticated": False}
     account = accounts.get_account(user_id)
     return {
         "user_id": user_id,
-        "authenticated": accounts.is_authenticated(user_id),
+        "authenticated": True,
         "display_name": account.get("display_name") if account else None,
         "providers": [p["provider"] for p in account.get("providers", [])] if account else [],
         "has_required_consents": accounts.has_required_consents(user_id),
@@ -213,17 +423,25 @@ async def list_children(user_id: str = Depends(get_current_user)):
 
 
 @app.post("/api/children")
-async def create_child(payload: ChildCreate, user_id: str = Depends(get_current_user)):
+async def create_child(
+    payload: ChildCreate,
+    user_id: str = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
     try:
-        child = accounts.add_child(user_id, payload.name, payload.birthdate)
+        child = await accounts.add_child(user_id, payload.name, payload.birthdate)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _child_with_age(child)
 
 
 @app.delete("/api/children/{child_id}")
-async def delete_child(child_id: str, user_id: str = Depends(get_current_user)):
-    if not accounts.delete_child(user_id, child_id):
+async def delete_child(
+    child_id: str,
+    user_id: str = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
+    if not await accounts.delete_child(user_id, child_id):
         raise HTTPException(status_code=404, detail="Child not found")
     return {"status": "ok"}
 
@@ -239,161 +457,207 @@ async def get_consents(user_id: str = Depends(get_current_user)):
 
 
 @app.post("/api/consents")
-async def record_consents(payload: ConsentRequest, user_id: str = Depends(get_current_user)):
-    consents = accounts.record_consents(user_id, payload.kinds, payload.version)
+async def record_consents(
+    payload: ConsentRequest,
+    user_id: str = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
+    consents = await accounts.record_consents(user_id, payload.kinds, payload.version)
     return {"consents": consents, "has_required": accounts.has_required_consents(user_id)}
 
 
+# --- The council pipeline ----------------------------------------------------
 @app.post("/api/conversations/{conversation_id}/message")
+@limiter.limit(RATE_LIMIT_MESSAGES)
 async def send_message(
     conversation_id: str,
-    request: SendMessageRequest,
-    user_id: str = Depends(get_current_user),
+    payload: SendMessageRequest,
+    request: Request,
+    response: Response,
+    user_id: str = Depends(require_authenticated_user),
+    _: None = Depends(require_csrf),
 ):
-    """
-    Send a message and run the staged council process.
-    Returns the complete response with all stages.
-    """
-    # Ownership-scoped lookup: a user can only act on their own conversation.
+    """Send a message and run the staged council process (non-streaming)."""
     conversation = store.get_conversation(user_id, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    is_first_message = len(conversation["messages"]) == 0
-    age_days = _resolve_age_days(user_id, request)
-    store.append_user_message(user_id, conversation_id, request.content)
-
-    # If this is the first message, generate a title
-    if is_first_message:
-        title = await generate_conversation_title(request.content)
-        store.update_title(user_id, conversation_id, title)
-
-    # Pre-pipeline safety triage (deterministic, fast). Non-medical red flags
-    # (self-harm, abuse) short-circuit the pediatric pipeline entirely.
-    triage = assess_emergency(age_days, request.content)
-    if triage and triage.get("short_circuit"):
-        stage3_result = _emergency_stage3(triage)
-        store.append_assistant_message(user_id, conversation_id, _EMPTY_STAGE0, [], [], stage3_result)
+    replay = _find_assistant_by_idempotency(conversation, payload.idempotency_key)
+    if replay:
         return {
-            "stage0": _EMPTY_STAGE0, "stage1": [], "stage2": [],
-            "stage3": stage3_result, "emergency": triage, "metadata": {}
+            "stage0": replay.get("stage0"), "stage1": replay.get("stage1"),
+            "stage2": replay.get("stage2"), "stage3": replay.get("stage3"),
+            "emergency": None, "metadata": {}, "replayed": True,
         }
 
-    # Run the staged council process (Stage 0 research first)
-    stage0_result, stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content,
-        age_days
-    )
+    # Quota is reserved BEFORE the pipeline and intentionally NOT refunded on failure —
+    # this prevents a retry-storm from amplifying paid calls past the daily ceiling.
+    if not await quota.check_and_increment(user_id):
+        raise HTTPException(
+            status_code=429, detail="하루 질문 한도를 초과했어요. 내일 다시 시도해 주세요.",
+            headers={"Retry-After": "86400"},
+        )
 
-    store.append_assistant_message(
-        user_id, conversation_id,
-        stage0_result, stage1_results, stage2_results, stage3_result
-    )
+    is_first_message = len(conversation["messages"]) == 0
+    age_days = _resolve_age_days(user_id, payload)
+    await store.append_user_message(user_id, conversation_id, payload.content)
 
-    # Return the complete response with metadata (+ any medical emergency interstitial)
-    return {
-        "stage0": stage0_result,
-        "stage1": stage1_results,
-        "stage2": stage2_results,
-        "stage3": stage3_result,
-        "emergency": triage,
-        "metadata": metadata
-    }
+    if is_first_message:
+        try:
+            title = await asyncio.wait_for(generate_conversation_title(payload.content), timeout=TITLE_TIMEOUT)
+        except asyncio.TimeoutError:
+            title = payload.content[:47]
+        await store.update_title(user_id, conversation_id, title)
+
+    # Pre-pipeline safety triage (deterministic, fast).
+    triage = assess_emergency(age_days, payload.content)
+    if triage and triage.get("short_circuit"):
+        stage3_result = _emergency_stage3(triage)
+        await store.append_assistant_message(
+            user_id, conversation_id, _EMPTY_STAGE0, [], [], stage3_result,
+            short_circuit=True, idempotency_key=payload.idempotency_key,
+        )
+        return {"stage0": _EMPTY_STAGE0, "stage1": [], "stage2": [],
+                "stage3": stage3_result, "emergency": triage, "metadata": {}}
+
+    try:
+        stage0_result, stage1_results, stage2_results, stage3_result, metadata = await asyncio.wait_for(
+            run_full_council(payload.content, age_days), timeout=PIPELINE_TIMEOUT
+        )
+    except Exception as e:  # noqa: BLE001 - timeout or any failure: persist partial, never leak
+        logger.exception("council pipeline failed", extra={"conversation_id": conversation_id})
+        await _persist_partial(user_id, conversation_id, None, None, None, payload.idempotency_key)
+        raise HTTPException(status_code=500, detail=GENERIC_ERROR_KO) from e
+
+    await store.append_assistant_message(
+        user_id, conversation_id, stage0_result, stage1_results, stage2_results, stage3_result,
+        idempotency_key=payload.idempotency_key,
+    )
+    return {"stage0": stage0_result, "stage1": stage1_results, "stage2": stage2_results,
+            "stage3": stage3_result, "emergency": triage, "metadata": metadata}
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
+@limiter.limit(RATE_LIMIT_MESSAGES)
 async def send_message_stream(
     conversation_id: str,
-    request: SendMessageRequest,
-    user_id: str = Depends(get_current_user),
+    payload: SendMessageRequest,
+    request: Request,
+    response: Response,
+    user_id: str = Depends(require_authenticated_user),
+    _: None = Depends(require_csrf),
 ):
-    """
-    Send a message and stream the staged council process.
-    Returns Server-Sent Events as each stage completes.
-    """
-    # Ownership-scoped lookup: a user can only act on their own conversation.
+    """Send a message and stream the staged council process as Server-Sent Events."""
     conversation = store.get_conversation(user_id, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if this is the first message
+    replay = _find_assistant_by_idempotency(conversation, payload.idempotency_key)
     is_first_message = len(conversation["messages"]) == 0
-    age_days = _resolve_age_days(user_id, request)
+    age_days = _resolve_age_days(user_id, payload)
 
     async def event_generator():
-        try:
-            # Add user message
-            store.append_user_message(user_id, conversation_id, request.content)
+        # Idempotent replay: re-emit the stored answer without re-running paid calls.
+        if replay:
+            if replay.get("stage0"):
+                yield f"data: {json.dumps({'type': 'stage0_complete', 'data': replay['stage0']})}\n\n"
+            if replay.get("stage3"):
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': replay['stage3']})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'replayed': True})}\n\n"
+            return
 
-            # Pre-pipeline safety triage — emit the emergency interstitial FIRST so a
-            # panicking parent sees "지금 119에 전화하세요 / 응급실로" in <2s, not after ~30-60s.
-            triage = assess_emergency(age_days, request.content)
+        partial: Dict[str, Any] = {"stage0": None, "stage1": None, "stage2": None}
+        saved = {"done": False}
+
+        async def save_partial():
+            if saved["done"]:
+                return
+            saved["done"] = True
+            try:
+                await _persist_partial(
+                    user_id, conversation_id, partial["stage0"], partial["stage1"],
+                    partial["stage2"], payload.idempotency_key,
+                )
+            except Exception:  # noqa: BLE001 - best effort on disconnect/cancel
+                logger.exception("partial persist failed", extra={"conversation_id": conversation_id})
+
+        try:
+            if not await quota.check_and_increment(user_id):
+                yield f"data: {json.dumps({'type': 'error', 'message': '하루 질문 한도를 초과했어요. 내일 다시 시도해 주세요.'})}\n\n"
+                return
+
+            await store.append_user_message(user_id, conversation_id, payload.content)
+
+            triage = assess_emergency(age_days, payload.content)
             if triage:
                 yield f"data: {json.dumps({'type': 'emergency', 'data': triage})}\n\n"
-            if triage and triage.get('short_circuit'):
-                # Non-medical red flag (self-harm/abuse): do NOT run the pediatric pipeline.
+            if triage and triage.get("short_circuit"):
                 stage3_result = _emergency_stage3(triage)
-                store.append_assistant_message(user_id, conversation_id, _EMPTY_STAGE0, [], [], stage3_result)
+                await store.append_assistant_message(
+                    user_id, conversation_id, _EMPTY_STAGE0, [], [], stage3_result,
+                    short_circuit=True, idempotency_key=payload.idempotency_key,
+                )
+                saved["done"] = True
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
                 yield f"data: {json.dumps({'type': 'complete'})}\n\n"
                 return
 
-            # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+                title_task = asyncio.create_task(generate_conversation_title(payload.content))
 
-            # Stage 0: Build the shared evidence base via web search
             yield f"data: {json.dumps({'type': 'stage0_start'})}\n\n"
-            stage0_result = await stage0_research(request.content)
-            yield f"data: {json.dumps({'type': 'stage0_complete', 'data': stage0_result})}\n\n"
+            partial["stage0"] = await asyncio.wait_for(stage0_research(payload.content), timeout=STAGE0_TIMEOUT)
+            yield f"data: {json.dumps({'type': 'stage0_complete', 'data': partial['stage0']})}\n\n"
 
-            # Stage 1: Collect responses grounded in the evidence base
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content, stage0_result)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            partial["stage1"] = await asyncio.wait_for(
+                stage1_collect_responses(payload.content, partial["stage0"]), timeout=STAGE1_TIMEOUT
+            )
+            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': partial['stage1']})}\n\n"
 
-            # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            partial["stage2"], label_to_model = await asyncio.wait_for(
+                stage2_collect_rankings(payload.content, partial["stage1"]), timeout=STAGE2_TIMEOUT
+            )
+            aggregate_rankings = calculate_aggregate_rankings(partial["stage2"], label_to_model)
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': partial['stage2'], 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
-            # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, stage0_result, age_days)
+            stage3_result = await asyncio.wait_for(
+                stage3_synthesize_final(payload.content, partial["stage1"], partial["stage2"], partial["stage0"], age_days),
+                timeout=STAGE3_TIMEOUT,
+            )
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
-            # Wait for title generation if it was started
             if title_task:
-                title = await title_task
-                store.update_title(user_id, conversation_id, title)
+                try:
+                    title = await asyncio.wait_for(title_task, timeout=TITLE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    title = payload.content[:47]
+                await store.update_title(user_id, conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
-            store.append_assistant_message(
-                user_id,
-                conversation_id,
-                stage0_result,
-                stage1_results,
-                stage2_results,
-                stage3_result
+            await store.append_assistant_message(
+                user_id, conversation_id, partial["stage0"], partial["stage1"],
+                partial["stage2"], stage3_result, idempotency_key=payload.idempotency_key,
             )
-
-            # Send completion event
+            saved["done"] = True
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
-        except Exception as e:
-            # Send error event
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected: stop burning paid calls, persist what we have.
+            await save_partial()
+            raise
+        except Exception:  # noqa: BLE001 - never leak str(e); persist partial
+            logger.exception("stream pipeline failed", extra={"conversation_id": conversation_id})
+            await save_partial()
+            yield f"data: {json.dumps({'type': 'error', 'message': GENERIC_ERROR_KO})}\n\n"
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
 

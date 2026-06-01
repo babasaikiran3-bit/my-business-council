@@ -210,7 +210,12 @@ def _format_triage(cat: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --- Final-answer safety net + disclaimer -------------------------------------
-_EMERGENCY_BLOCKQUOTE_RE = re.compile(r"^\s*>?\s*\**\s*(EMERGENCY|응급)\b", re.IGNORECASE | re.MULTILINE)
+# NOTE: `\b` never fires after Hangul in Python/JS regex, so `> 응급:` went undetected
+# and apply_safety_net could double-prepend the banner. Match a following separator
+# (whitespace/colon, ASCII or full-width) instead — Hangul-safe and idempotent.
+_EMERGENCY_BLOCKQUOTE_RE = re.compile(
+    r"^\s*>?\s*\**\s*(?:EMERGENCY|응급)[\s:：]", re.IGNORECASE | re.MULTILINE
+)
 
 NEWBORN_FEVER_EMERGENCY_KO = (
     "> 응급: 생후 3개월 미만 아기의 발열은 응급 상황입니다. 지금 바로 의사에게 연락하거나 가까운 "

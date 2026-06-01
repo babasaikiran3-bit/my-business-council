@@ -1,9 +1,12 @@
 """OpenRouter API client for making LLM requests."""
 
+import logging
 import httpx
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+
+logger = logging.getLogger("parenting_roundtable.openrouter")
 
 
 def _hostname_in_allowlist(url: str, allowed_domains: List[str]) -> bool:
@@ -84,7 +87,7 @@ async def query_model(
             }
 
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
+        logger.warning("query_model failed", extra={"model": model, "error": str(e)})
         return None
 
 

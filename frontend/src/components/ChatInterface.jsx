@@ -39,7 +39,7 @@ function hasMachinery(m) {
   return Boolean(stage0HasContent || (m.stage1 && m.stage1.length) || (m.stage2 && m.stage2.length));
 }
 
-export default function ChatInterface({ conversation, onSendMessage, isLoading }) {
+export default function ChatInterface({ conversation, onSendMessage, onRetry, isLoading }) {
   const [input, setInput] = useState('');
   const [ageValue, setAgeValue] = useState(AGE_OPTIONS[2].value);
   const messagesEndRef = useRef(null);
@@ -59,6 +59,7 @@ export default function ChatInterface({ conversation, onSendMessage, isLoading }
 
   const submit = () => {
     if (!input.trim() || isLoading) return;
+    if (input.length > 5000) return; // align to the server cap (MAX_MESSAGE_CHARS)
     const option = AGE_OPTIONS.find((opt) => opt.value === ageValue) || AGE_OPTIONS[2];
     const content = `Child age: ${option.label} (${option.sub}). Question: ${input}`;
     // age_days travels as a typed field — the safety triage never parses it from the prompt.
@@ -128,12 +129,24 @@ export default function ChatInterface({ conversation, onSendMessage, isLoading }
                   {!msg.stage3 && !msg.error && <CalmProgress />}
                   {msg.error && (
                     <div className="answer-error" role="alert">
-                      답변을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.
+                      <span>답변을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.</span>
+                      {onRetry && (
+                        <button
+                          type="button"
+                          className="retry-button"
+                          onClick={onRetry}
+                          disabled={isLoading}
+                        >
+                          다시 시도
+                        </button>
+                      )}
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
 
-                  {/* The multi-AI machinery, tucked behind an optional expander */}
+                  {/* The multi-AI machinery, tucked behind an optional expander.
+                      Each panel renders ONLY when it has real content, so short-circuit /
+                      partial messages (empty later stages) never show broken empty panels. */}
                   {msg.stage3 && hasMachinery(msg) && (
                     <details className="how-we-got-this">
                       <summary className="how-we-got-this-summary">
@@ -141,14 +154,14 @@ export default function ChatInterface({ conversation, onSendMessage, isLoading }
                         <span>어떻게 이 답을 찾았는지 보기</span>
                       </summary>
                       <div className="how-we-got-this-body">
-                        {msg.stage0 && (
+                        {msg.stage0 && (msg.stage0.evidence_brief || msg.stage0.sources?.length > 0) && (
                           <Stage0
                             evidenceBrief={msg.stage0?.evidence_brief}
                             sources={msg.stage0?.sources}
                           />
                         )}
-                        {msg.stage1 && <Stage1 responses={msg.stage1} />}
-                        {msg.stage2 && (
+                        {msg.stage1?.length > 0 && <Stage1 responses={msg.stage1} />}
+                        {msg.stage2?.length > 0 && (
                           <Stage2
                             rankings={msg.stage2}
                             labelToModel={msg.metadata?.label_to_model}
@@ -223,6 +236,7 @@ export default function ChatInterface({ conversation, onSendMessage, isLoading }
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isLoading}
+              maxLength={5000}
               rows={2}
             />
             <button

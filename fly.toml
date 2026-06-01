@@ -1,0 +1,45 @@
+# Fly.io config for the Parenting Roundtable backend (pilot).
+# Durability backbone: a PERSISTENT volume mounted at DATA_DIR. Without it, a PaaS
+# ephemeral filesystem loses every conversation on redeploy/restart.
+#
+# One-time provisioning:
+#   fly volumes create pr_data --size 1 --region nrt
+#   fly secrets set SESSION_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(32))") \
+#       OPENROUTER_API_KEY=... KAKAO_REST_API_KEY=... KAKAO_CLIENT_SECRET=... \
+#       KAKAO_REDIRECT_URI=https://api.yourdomain.com/api/auth/kakao/callback
+
+app = "parenting-roundtable"
+primary_region = "nrt"   # Tokyo — closest Fly region to Korean users
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  DATA_DIR = "/data/conversations"
+  CORS_ORIGINS = "https://app.yourdomain.com"
+  FRONTEND_URL = "https://app.yourdomain.com"
+  LOG_LEVEL = "INFO"
+
+[[mounts]]
+  source = "pr_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8001
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1   # SINGLE machine: the storage lock / rate limiter / quota assume one process
+
+  [[http_service.checks]]
+    method = "get"
+    path = "/health"
+    interval = "15s"
+    timeout = "3s"
+
+# Pilot ceiling: do NOT scale to >1 machine/worker without first moving to Postgres +
+# a shared rate-limit store (the JSON+asyncio.Lock design is single-process by design).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
