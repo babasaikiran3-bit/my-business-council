@@ -327,8 +327,13 @@ async def delete_conversation(
 # Identity: OAuth login (Kakao primary, Naver ready), session, profiles, consent
 # ---------------------------------------------------------------------------
 class ChildCreate(BaseModel):
-    name: str
-    birthdate: str  # YYYY-MM-DD
+    name: str = ""  # optional; UI shows "우리 아이" when blank
+    birthdate: str  # YYYY-MM-DD (the UI sends YYYY-MM-01 — year+month granularity)
+
+
+class ChildUpdate(BaseModel):
+    name: Optional[str] = None
+    birthdate: Optional[str] = None
 
 
 class ConsentRequest(BaseModel):
@@ -432,6 +437,22 @@ async def create_child(
         child = await accounts.add_child(user_id, payload.name, payload.birthdate)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return _child_with_age(child)
+
+
+@app.patch("/api/children/{child_id}")
+async def update_child(
+    child_id: str,
+    payload: ChildUpdate,
+    user_id: str = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
+    try:
+        child = await accounts.update_child(user_id, child_id, payload.name, payload.birthdate)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if child is None:
+        raise HTTPException(status_code=404, detail="Child not found")
     return _child_with_age(child)
 
 

@@ -85,6 +85,7 @@ export const api = {
           body: JSON.stringify({
             content,
             age_days: ageDays,
+            child_profile_id: opts.childProfileId ?? null,
             idempotency_key: opts.idempotencyKey,
           }),
           signal: controller.signal,
@@ -159,6 +160,17 @@ export const api = {
       body: JSON.stringify({ name, birthdate }),
     });
     if (!r.ok) throw new Error('Failed to create child');
+    return r.json();
+  },
+
+  async updateChild(childId, fields) {
+    const r = await fetch(`${API_BASE}/api/children/${childId}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(fields),
+    });
+    if (!r.ok) throw new Error('Failed to update child');
     return r.json();
   },
 

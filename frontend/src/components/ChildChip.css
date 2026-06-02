@@ -1,0 +1,61 @@
+.child-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--rose-50);
+  border: 1px solid var(--rose-200);
+  border-radius: var(--r-pill);
+  color: var(--rose-700);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+
+.child-chip:hover {
+  background: var(--rose-100);
+  border-color: var(--rose-300);
+}
+
+.child-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--rose-500);
+}
+
+.child-chip-sep {
+  color: var(--rose-300);
+}
+
+.child-chip-age {
+  font-weight: 500;
+  color: var(--rose-600);
+}
+
+.child-chip-caret {
+  margin-left: 2px;
+  color: var(--rose-400);
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* No-profile state: quiet, dashed, present-but-not-loud */
+.child-chip--empty {
+  background: var(--surface-2);
+  border: 1px dashed var(--line-2);
+  color: var(--ink-3);
+}
+
+.child-chip--empty:hover {
+  background: var(--surface-3);
+  border-color: var(--rose-200);
+  color: var(--ink-2);
+}
+
+.child-chip-plus {
+  font-size: 15px;
+  line-height: 1;
+}

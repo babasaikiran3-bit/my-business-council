@@ -165,6 +165,29 @@
   font-size: 12px;
 }
 
+.sidebar-settings {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% - 20px);
+  margin: 0 10px;
+  padding: 11px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.sidebar-settings:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
 .sidebar-account {
   border-top: 1px solid var(--line);
   padding: 14px;

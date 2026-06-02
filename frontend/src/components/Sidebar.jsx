@@ -8,6 +8,7 @@ import {
   KakaoGlyph,
   NaverGlyph,
   MessageHeart,
+  Settings,
 } from './Icons';
 
 const PROVIDERS = {
@@ -24,6 +25,7 @@ export default function Sidebar({
   providers = {},
   onLogin,
   onLogout,
+  onOpenSettings,
   open = false,
   onClose,
 }) {
@@ -78,6 +80,11 @@ export default function Sidebar({
           ))
         )}
       </div>
+
+      <button type="button" className="sidebar-settings" onClick={onOpenSettings}>
+        <Settings size={18} />
+        <span>설정</span>
+      </button>
 
       <div className="sidebar-account">
         {user?.authenticated ? (

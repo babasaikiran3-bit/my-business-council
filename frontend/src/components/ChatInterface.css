@@ -227,6 +227,45 @@
   box-shadow: var(--shadow-md);
 }
 
+/* ---------- Early sources (shown while the answer is still being written) ---------- */
+.early-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  animation: welcome-rise 0.4s var(--ease) both;
+}
+
+.early-sources-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sage-700);
+  margin-right: 2px;
+}
+
+.early-source-chip {
+  padding: 4px 10px;
+  background: var(--sage-50);
+  border: 1px solid var(--sage-100);
+  border-radius: var(--r-pill);
+  color: var(--sage-700);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.early-source-chip:hover {
+  border-color: var(--sage-200);
+}
+
 /* ---------- Progressive disclosure (the multi-AI machinery) ---------- */
 .how-we-got-this {
   max-width: 100%;
@@ -428,6 +467,98 @@
   font-size: 11.5px;
   color: var(--ink-3);
   margin-top: 8px;
+}
+
+/* ---------- Child chip + category entry (welcome state) ---------- */
+.composer-context {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.category-pill {
+  padding: 7px 15px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.category-pill:hover {
+  border-color: var(--rose-300);
+}
+
+.category-pill.active {
+  background: var(--rose-500);
+  border-color: var(--rose-500);
+  color: #fff;
+}
+
+.category-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto 14px;
+}
+
+/* ---------- Thread footer (quiet disclaimer + next step) ---------- */
+.thread-footer {
+  max-width: 760px;
+  margin: 22px auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.thread-disclaimer {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-align: center;
+  line-height: 1.5;
+  max-width: 520px;
+}
+
+.new-question-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  color: var(--rose-600);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease);
+}
+
+.new-question-cta:hover {
+  background: var(--surface-3);
+  border-color: var(--rose-300);
+}
+
+.composer-locked {
+  flex-shrink: 0;
+  width: 100%;
+  padding: 8px 20px max(24px, env(safe-area-inset-bottom));
 }
 
 /* ---------- Mobile ---------- */

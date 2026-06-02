@@ -167,10 +167,10 @@ class AccountStore:
         return None
 
     async def add_child(self, user_id: str, name: str, birthdate: str) -> Dict[str, Any]:
+        # Name is OPTIONAL (the UI shows "우리 아이" when blank); only the birthdate is
+        # required for the safety-relevant age. Reject over-long or control-char names.
         name = (name or "").strip()
-        # Reject empty, over-long, or control-character names (the latter can break
-        # downstream rendering/logging and is never a legitimate child name).
-        if not name or len(name) > 40 or any(ord(c) < 32 for c in name):
+        if len(name) > 40 or any(ord(c) < 32 for c in name):
             raise ValueError("invalid name")
         if age_days_from_birthdate(birthdate) is None:
             raise ValueError("invalid birthdate")
@@ -180,6 +180,30 @@ class AccountStore:
             account["children"].append(child)
             await asyncio.to_thread(self._save_account, account)
         return child
+
+    async def update_child(
+        self, user_id: str, child_id: str,
+        name: Optional[str] = None, birthdate: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Patch a child's name and/or birthdate. Returns the updated child, or None if absent."""
+        async with self._lock_for(f"account:{user_id}"):
+            account = self.get_account(user_id)
+            if not account:
+                return None
+            child = next((c for c in account["children"] if c["id"] == child_id), None)
+            if child is None:
+                return None
+            if name is not None:
+                name = name.strip()
+                if len(name) > 40 or any(ord(c) < 32 for c in name):
+                    raise ValueError("invalid name")
+                child["name"] = name
+            if birthdate is not None:
+                if age_days_from_birthdate(birthdate) is None:
+                    raise ValueError("invalid birthdate")
+                child["birthdate"] = birthdate
+            await asyncio.to_thread(self._save_account, account)
+            return child
 
     async def delete_child(self, user_id: str, child_id: str) -> bool:
         async with self._lock_for(f"account:{user_id}"):

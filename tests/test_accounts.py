@@ -66,12 +66,23 @@ async def test_child_crud_and_isolation(tmp_path):
 
 async def test_child_validation(tmp_path):
     store = AccountStore(str(tmp_path))
-    with pytest.raises(ValueError):
-        await store.add_child("u1", "", "2024-06-01")
+    # Name is optional now — empty name is allowed (only birthdate is required).
+    child = await store.add_child("u1", "", "2024-06-01")
+    assert child["name"] == ""
     with pytest.raises(ValueError):
         await store.add_child("u1", "x", "not-a-date")
     with pytest.raises(ValueError):
         await store.add_child("u1", "bad\x00name", "2024-06-01")  # control char rejected
+
+
+async def test_update_child(tmp_path):
+    store = AccountStore(str(tmp_path))
+    cid = (await store.add_child("u1", "민준", "2024-06-01"))["id"]
+    updated = await store.update_child("u1", cid, name="민준이", birthdate="2024-05-01")
+    assert updated["name"] == "민준이" and updated["birthdate"] == "2024-05-01"
+    assert await store.update_child("u1", "nope", name="x") is None  # unknown child
+    with pytest.raises(ValueError):
+        await store.update_child("u1", cid, birthdate="bad")
 
 
 async def test_consents(tmp_path):

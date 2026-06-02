@@ -50,6 +50,13 @@
   cursor: pointer;
 }
 
+/* Leave room for the fixed mobile bottom tab bar (56px + safe area). */
+@media (max-width: 899px) {
+  .main-col {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+}
+
 /* Mobile top bar — only shown on small screens; holds the drawer toggle + brand. */
 .mobile-topbar {
   display: none;
