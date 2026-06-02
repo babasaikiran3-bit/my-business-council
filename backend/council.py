@@ -46,8 +46,16 @@ async def stage2_collect_rankings(
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
-    # Create anonymized labels for responses (Response A, Response B, etc.)
-    labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
+    # Create anonymized labels for responses (Response A, Response B, ..., Response Z, Response AA, ...)
+    labels = []
+    for i in range(len(stage1_results)):
+        if i < 26:
+            labels.append(chr(65 + i))
+        else:
+            # Beyond Z, use AA, AB, etc.
+            first = chr(65 + (i // 26) - 1)
+            second = chr(65 + (i % 26))
+            labels.append(first + second)
 
     # Create mapping from label to model name
     label_to_model = {
@@ -194,17 +202,12 @@ def parse_ranking_from_text(ranking_text: str) -> List[str]:
             ranking_section = parts[1]
             # Try to extract numbered list format (e.g., "1. Response A")
             # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
+            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]+', ranking_section)
             if numbered_matches:
-                # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
-
-            # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
+                return [re.search(r'Response [A-Z]+', m).group() for m in numbered_matches]
+            matches = re.findall(r'Response [A-Z]+', ranking_section)
             return matches
-
-    # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
+    matches = re.findall(r'Response [A-Z]+', ranking_text)
     return matches
 
 
