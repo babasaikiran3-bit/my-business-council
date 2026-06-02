@@ -41,6 +41,9 @@ async def query_model(
             response.raise_for_status()
 
             data = response.json()
+            if not data.get('choices'):
+                print(f"Error: No choices in response from model {model}: {data}")
+                return None
             message = data['choices'][0]['message']
 
             return {
