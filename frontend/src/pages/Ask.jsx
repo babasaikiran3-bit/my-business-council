@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/appContext';
 import ChatInterface from '../components/ChatInterface';
 import LoginWall from '../components/LoginWall';
 
@@ -25,8 +25,10 @@ export default function Ask() {
   useEffect(() => {
     let cancelled = false;
     if (!routeId) {
-      setCurrentConversation(null);
       ownedIdRef.current = null;
+      queueMicrotask(() => {
+        if (!cancelled) setCurrentConversation(null);
+      });
       return;
     }
     if (ownedIdRef.current === routeId) return; // just created / streaming — keep memory state

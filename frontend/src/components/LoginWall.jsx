@@ -1,5 +1,5 @@
 import { api } from '../api';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/appContext';
 import { ShieldCheck, BadgeCheck, Users, KakaoGlyph, NaverGlyph } from './Icons';
 import './LoginWall.css';
 

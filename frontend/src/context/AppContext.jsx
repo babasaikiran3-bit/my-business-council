@@ -1,15 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
+import { AppContext } from './appContext';
 
 /**
  * App-wide state shared across routes: auth, child profiles, the active child,
  * the conversation list, and the onboarding / free-question flags. Chat streaming
  * state stays local to the Ask page; this holds only what multiple screens need.
  */
-const AppContext = createContext(null);
-
-export const useApp = () => useContext(AppContext);
-
 const LS = {
   onboarded: 'pr_onboarded',
   activeChild: 'pr_active_child',
@@ -52,18 +49,19 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = useCallback(async function loadConversations() {
     try {
       setConversations(await api.listConversations());
     } catch {
-      setBanner({ text: '대화 목록을 불러오지 못했어요.', retry: refreshConversations });
+      setBanner({ text: '대화 목록을 불러오지 못했어요.', retry: loadConversations });
     }
   }, []);
 
   useEffect(() => {
-    refreshAuth();
-    refreshChildren();
-    refreshConversations();
+    const loadInitialState = async () => {
+      await Promise.all([refreshAuth(), refreshChildren(), refreshConversations()]);
+    };
+    loadInitialState();
   }, [refreshAuth, refreshChildren, refreshConversations]);
 
   const setActiveChildId = useCallback((id) => {

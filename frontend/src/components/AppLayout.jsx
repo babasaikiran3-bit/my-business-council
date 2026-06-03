@@ -4,7 +4,7 @@ import Sidebar from './Sidebar';
 import BottomTabBar from './BottomTabBar';
 import { Logo, Menu } from './Icons';
 import { api } from '../api';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/appContext';
 import '../App.css';
 
 /**

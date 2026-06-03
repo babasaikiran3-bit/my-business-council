@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/appContext';
 import { toBirthdate } from '../lib/age';
 import { Logo, ShieldCheck, BadgeCheck, ArrowRight, KakaoGlyph, NaverGlyph, Check } from '../components/Icons';
 import './Start.css';

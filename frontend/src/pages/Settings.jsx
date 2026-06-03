@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../context/appContext';
 import { ageLabel, childDisplayName, toBirthdate, fromBirthdate } from '../lib/age';
 import { Plus, Pencil, Trash, Check, User, LogOut, KakaoGlyph, NaverGlyph } from '../components/Icons';
 import './Settings.css';

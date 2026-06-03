@@ -9,23 +9,9 @@ import CalmProgress from './CalmProgress';
 import ChildChip from './ChildChip';
 import { Logo, Send, ChevronDown, BadgeCheck, Plus } from './Icons';
 import { ageLabel } from '../lib/age';
+import { CATEGORIES, HERO_STATS, TAGLINE, TRUST_SOURCES } from './heroContent';
 import './ChatInterface.css';
 
-const TAGLINE =
-  '믿을 수 있는 의료 출처를 바탕으로, AI 패널이 함께 검토한 육아 답변. 새벽 2시에 더 이상 혼자 검색하지 않아도 되도록.';
-
-const TRUST_SOURCES = ['질병관리청', '대한소아청소년과학회', '식약처', 'WHO', 'AAP'];
-
-// Welcome-state category entry (decision 2). Hidden once a thread exists.
-const CATEGORIES = [
-  { id: 'fever', label: '열·체온', examples: ['38도 열이 나는데 해열제를 먹여도 될까요?', '열이 며칠째 안 떨어져요. 언제 병원에 가야 하나요?'] },
-  { id: 'sleep', label: '수면', examples: ['밤에 자주 깨서 우는 아이, 어떻게 도와줄까요?', '수면 교육은 언제 시작하면 좋을까요?'] },
-  { id: 'feeding', label: '먹이기', examples: ['6개월 아기 이유식, 어떻게 시작하면 좋을까요?', '분유를 잘 안 먹는데 괜찮을까요?'] },
-  { id: 'development', label: '발달', examples: ['또래보다 늦게 걷는 것 같아요. 정상인가요?', '말이 느린데 언제 검사를 받아야 하나요?'] },
-  { id: 'other', label: '기타', examples: ['아이가 자꾸 토하는데 언제 병원에 가야 하나요?', '예방접종 후 열이 나면 어떻게 해야 하나요?'] },
-];
-
-// True when there is multi-AI "machinery" worth tucking behind the expander.
 function hasMachinery(m) {
   const stage0HasContent =
     m.stage0 && (m.stage0.evidence_brief || (m.stage0.sources && m.stage0.sources.length));
@@ -167,11 +153,20 @@ export default function ChatInterface({
           ))
         ) : (
           <div className="welcome">
-            <div className="welcome-mark">
-              <Logo size={64} />
+            <div className="welcome-kicker">
+              <Logo size={28} />
+              <span>부모 라운드테이블</span>
             </div>
-            <h1 className="welcome-title">무엇이든 물어보세요</h1>
+            <h1 className="welcome-title">부모 라운드테이블에 바로 물어보세요</h1>
             <p className="welcome-tagline">{TAGLINE}</p>
+            <div className="hero-stats" aria-label="서비스 방식">
+              {HERO_STATS.map((item) => (
+                <div key={item.label} className="hero-stat">
+                  <strong>{item.value}</strong>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
             <div className="welcome-trust">
               <BadgeCheck size={15} />
               <span>{TRUST_SOURCES.join(' · ')} 등 신뢰할 수 있는 출처를 확인해요</span>
@@ -199,7 +194,7 @@ export default function ChatInterface({
         composerLocked ? (
           <div className="composer-locked">{lockedNode}</div>
         ) : (
-          <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <form className="composer hero-ask-panel" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <div className="composer-context">
               <ChildChip child={activeChild} onClick={onEditChild} />
             </div>

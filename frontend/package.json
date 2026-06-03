@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:main-hero": "node scripts/check-main-hero.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
