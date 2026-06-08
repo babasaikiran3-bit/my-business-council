@@ -23,7 +23,7 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        if response is not None and response.get('content') and not response.get('error'):
             stage1_results.append({
                 "model": model,
                 "response": response.get('content', '')
@@ -100,7 +100,7 @@ Now provide your evaluation and ranking:"""
     # Format results
     stage2_results = []
     for model, response in responses.items():
-        if response is not None:
+        if response is not None and response.get('content') and not response.get('error'):
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
@@ -158,19 +158,30 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     messages = [{"role": "user", "content": chairman_prompt}]
 
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    # Stage 3 prompts are large; allow extra time for synthesis.
+    synthesis_timeout = 180.0
+    chairman_candidates = [CHAIRMAN_MODEL] + [
+        model for model in COUNCIL_MODELS if model != CHAIRMAN_MODEL
+    ]
 
-    if response is None:
-        # Fallback if chairman fails
-        return {
-            "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
-        }
+    last_error = "Unknown error"
+    for model in chairman_candidates:
+        response = await query_model(model, messages, timeout=synthesis_timeout)
+
+        if response is not None and response.get('content') and not response.get('error'):
+            return {
+                "model": model,
+                "response": response.get('content', '')
+            }
+
+        if response is not None and response.get('error'):
+            last_error = response['error']
+        elif response is None:
+            last_error = "No response from OpenRouter."
 
     return {
         "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "response": f"Error: Unable to generate final synthesis. ({last_error})"
     }
 
 

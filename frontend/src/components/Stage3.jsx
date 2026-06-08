@@ -1,6 +1,15 @@
 import ReactMarkdown from 'react-markdown';
 import './Stage3.css';
 
+function formatModelName(model) {
+  const name = Array.isArray(model) ? model[0] : model;
+  if (typeof name !== 'string') {
+    return String(name ?? 'unknown');
+  }
+  const parts = name.split('/');
+  return parts.length > 1 ? parts[parts.length - 1] : name;
+}
+
 export default function Stage3({ finalResponse }) {
   if (!finalResponse) {
     return null;
@@ -11,7 +20,7 @@ export default function Stage3({ finalResponse }) {
       <h3 className="stage-title">Stage 3: Final Council Answer</h3>
       <div className="final-response">
         <div className="chairman-label">
-          Chairman: {finalResponse.model.split('/')[1] || finalResponse.model}
+          Chairman: {formatModelName(finalResponse.model)}
         </div>
         <div className="final-text markdown-content">
           <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
