@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -10,35 +10,60 @@ function App() {
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
-
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     try {
       const convs = await api.listConversations();
       setConversations(convs);
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
-  };
+  }, []);
 
-  const loadConversation = async (id) => {
-    try {
-      const conv = await api.getConversation(id);
-      setCurrentConversation(conv);
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    }
-  };
+  // Load conversations on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchConversations = async () => {
+      try {
+        const convs = await api.listConversations();
+        if (!cancelled) {
+          setConversations(convs);
+        }
+      } catch (error) {
+        console.error('Failed to load conversations:', error);
+      }
+    };
+
+    fetchConversations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load conversation details when selected
+  useEffect(() => {
+    if (!currentConversationId) return;
+
+    let cancelled = false;
+
+    const fetchConversation = async () => {
+      try {
+        const conv = await api.getConversation(currentConversationId);
+        if (!cancelled) {
+          setCurrentConversation(conv);
+        }
+      } catch (error) {
+        console.error('Failed to load conversation:', error);
+      }
+    };
+
+    fetchConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentConversationId]);
 
   const handleNewConversation = async () => {
     try {

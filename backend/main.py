@@ -1,16 +1,20 @@
 """FastAPI backend for LLM Council."""
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+from pathlib import Path
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 app = FastAPI(title="LLM Council API")
 
@@ -50,9 +54,18 @@ class Conversation(BaseModel):
     messages: List[Dict[str, Any]]
 
 
+@app.get("/api/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "ok", "service": "LLM Council API"}
+
+
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Serve the built frontend when available, otherwise return API status."""
+    index_path = FRONTEND_DIST / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     return {"status": "ok", "service": "LLM Council API"}
 
 
@@ -192,6 +205,10 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             "Connection": "keep-alive",
         }
     )
+
+
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
 
 if __name__ == "__main__":

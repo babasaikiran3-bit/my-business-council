@@ -79,6 +79,18 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+**Option 3: Run with Docker**
+```bash
+docker build -t llm-council .
+docker run --rm \
+  --env-file .env \
+  -p 8001:8001 \
+  -v "$(pwd)/data:/app/data" \
+  llm-council
+```
+
+Then open http://localhost:8001 in your browser.
+
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
