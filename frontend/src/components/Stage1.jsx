@@ -10,8 +10,8 @@ export default function Stage1({ responses }) {
   }
 
   return (
-    <div className="stage stage1">
-      <h3 className="stage-title">Stage 1: Individual Responses</h3>
+    <details className="stage stage1" open>
+      <summary className="stage-title">Stage 1: Individual Responses</summary>
 
       <div className="tabs">
         {responses.map((resp, index) => (
@@ -31,6 +31,6 @@ export default function Stage1({ responses }) {
           <ReactMarkdown>{responses[activeTab].response}</ReactMarkdown>
         </div>
       </div>
-    </div>
+    </details>
   );
 }

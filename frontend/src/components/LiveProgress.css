@@ -1,0 +1,68 @@
+.live-progress {
+  margin: 12px 0;
+  border: 1px solid #d6e4f0;
+  border-radius: 10px;
+  background: #f5faff;
+  overflow: hidden;
+}
+
+.live-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #2b6cb0;
+  background: #e6f0fa;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #38a169;
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.live-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.live-row {
+  display: grid;
+  grid-template-columns: 90px 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-top: 1px solid #eaf2fa;
+}
+
+.live-model {
+  font-weight: 600;
+  color: #4a5568;
+  font-family: monospace;
+}
+
+.live-icon {
+  text-align: center;
+}
+
+.live-line {
+  color: #4a5568;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-row.done .live-line { color: #38a169; }
+.live-row.error .live-line { color: #e53e3e; }
+.live-row.working .live-line { color: #2d3748; }

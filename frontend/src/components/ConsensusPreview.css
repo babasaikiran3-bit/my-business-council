@@ -1,0 +1,116 @@
+.cpreview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5vh 16px;
+  z-index: 1100;
+}
+
+.cpreview-modal {
+  width: 760px;
+  max-width: 94vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.cpreview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.cpreview-head h3 {
+  margin: 0 0 4px 0;
+  font-size: 17px;
+  color: #1a202c;
+}
+
+.cpreview-target {
+  font-size: 12px;
+  color: #718096;
+}
+
+.cpreview-target code {
+  background: #edf2f7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.cpreview-close {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 4px;
+}
+.cpreview-close:hover:not(:disabled) { color: #4a5568; }
+
+.cpreview-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 24px;
+  background: #fcfdff;
+}
+
+.cpreview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid #edf2f7;
+  background: #fafbfc;
+}
+
+.cpreview-note {
+  font-size: 12px;
+  color: #a0aec0;
+}
+
+.cpreview-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.cpreview-discard {
+  padding: 9px 18px;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  background: #fff;
+  color: #4a5568;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cpreview-discard:hover:not(:disabled) { background: #f7fafc; }
+
+.cpreview-approve {
+  padding: 9px 18px;
+  border: 1px solid #38a169;
+  border-radius: 8px;
+  background: #38a169;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cpreview-approve:hover:not(:disabled) { background: #2f855a; }
+
+.cpreview-discard:disabled,
+.cpreview-approve:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

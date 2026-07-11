@@ -14,6 +14,9 @@ wheels/
 
 # Data files
 data/
+/council.db
+/council.db-shm
+/council.db-wal
 
 # Frontend
 frontend/node_modules/

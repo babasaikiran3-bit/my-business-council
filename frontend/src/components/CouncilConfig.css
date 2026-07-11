@@ -1,0 +1,120 @@
+.council-config {
+  position: relative;
+}
+
+.config-toggle {
+  padding: 5px 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  color: #4a5568;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.config-toggle:hover {
+  background: #f0f4f8;
+  border-color: #4a90e2;
+}
+
+.config-panel {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  z-index: 50;
+  width: 360px;
+  background: #fff;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 14px;
+}
+
+.config-header {
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+
+.config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f7f9fc;
+}
+
+.config-row.unavailable {
+  opacity: 0.6;
+}
+
+.config-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.member-label {
+  font-weight: 500;
+  color: #2d3748;
+}
+
+.health {
+  font-size: 12px;
+}
+
+.health.ok {
+  color: #38a169;
+}
+
+.health.bad {
+  color: #a0aec0;
+  font-size: 11px;
+}
+
+.chairman-pick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #718096;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.config-error {
+  color: #e53e3e;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.config-actions {
+  margin-top: 12px;
+  text-align: right;
+}
+
+.config-save {
+  padding: 6px 16px;
+  background: #4a90e2;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.config-save:disabled {
+  background: #a0aec0;
+  cursor: not-allowed;
+}

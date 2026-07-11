@@ -3,34 +3,49 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import RepoSelector from './RepoSelector';
+import CouncilConfig from './CouncilConfig';
+import LiveProgress from './LiveProgress';
 import './ChatInterface.css';
+
+const STAGE_LABEL = { 0: 'investigando (web)', 1: 'explorando repo', 2: 'ranking', 3: 'síntesis' };
 
 export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  currentRepo,
+  onRepoChange,
+  onDocumentConsensus,
+  isDocumenting,
 }) {
   const [input, setInput] = useState('');
+  const [writeConsensus, setWriteConsensus] = useState(false);
+  const [research, setResearch] = useState(true); // Ronda 0 de búsqueda, ON por defecto
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [conversation]);
+  useEffect(() => { scrollToBottom(); }, [conversation]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input);
+      onSendMessage(input, { research });
       setInput('');
     }
   };
 
+  // ¿Hay un consenso (Stage 3) en el último turno, listo para documentar?
+  const lastMsg = conversation?.messages?.[conversation.messages.length - 1];
+  const hasConsensus = !!(lastMsg && lastMsg.role === 'assistant' && lastMsg.stage3);
+  const alreadyDocumented = !!(lastMsg && (lastMsg.consensusFile || lastMsg.stage3?.consensus_file));
+  const canDocument =
+    writeConsensus && !!currentRepo && hasConsensus && !alreadyDocumented && !isLoading && !isDocumenting;
+
   const handleKeyDown = (e) => {
-    // Submit on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
@@ -42,19 +57,27 @@ export default function ChatInterface({
       <div className="chat-interface">
         <div className="empty-state">
           <h2>Welcome to LLM Council</h2>
-          <p>Create a new conversation to get started</p>
+          <p>Creá una conversación para empezar</p>
         </div>
       </div>
     );
   }
 
+  const header = (
+    <div className="chat-header">
+      <RepoSelector value={currentRepo} onChange={onRepoChange} />
+      <CouncilConfig />
+    </div>
+  );
+
   return (
     <div className="chat-interface">
+      {header}
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <h2>Empezá una consulta</h2>
+            <p>{currentRepo ? `El consejo debatirá sobre ${currentRepo}` : 'Preguntale al consejo (sin repo: Q&A general)'}</p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -72,20 +95,34 @@ export default function ChatInterface({
                 <div className="assistant-message">
                   <div className="message-label">LLM Council</div>
 
-                  {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
-                    </div>
+                  {/* Progreso en vivo (mientras corre, antes de la síntesis) */}
+                  {msg.live && Object.keys(msg.live).length > 0 && !msg.stage3 && (
+                    <LiveProgress agents={msg.live} stageLabel={STAGE_LABEL[msg.stage]} />
                   )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
+
+                  {msg.error && <div className="stage-error">⚠ {msg.error}</div>}
+
+                  {/* Stage 0 — brief de investigación (colapsable) */}
+                  {(msg.research?.brief || msg.metadata?.research?.brief) && (
+                    <details className="research-brief">
+                      <summary>
+                        🔎 Ronda 0 · Investigación
+                        <span className="research-by"> — {msg.research?.model || msg.metadata?.research?.model}</span>
+                      </summary>
+                      <div className="markdown-content">
+                        <ReactMarkdown>{msg.research?.brief || msg.metadata?.research?.brief}</ReactMarkdown>
+                      </div>
+                    </details>
+                  )}
+
+                  {/* Stage 1 */}
+                  {msg.stage1 && msg.stage1.length > 0 && <Stage1 responses={msg.stage1} />}
 
                   {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
+                  {msg.stage === 2 && !msg.stage2 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
+                      <span>Etapa 2: ranking ciego entre pares…</span>
                     </div>
                   )}
                   {msg.stage2 && (
@@ -97,10 +134,16 @@ export default function ChatInterface({
                   )}
 
                   {/* Stage 3 */}
-                  {msg.loading?.stage3 && (
+                  {msg.stage === 3 && !msg.stage3 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
+                      <span>Etapa 3: síntesis del chairman…</span>
+                    </div>
+                  )}
+                  {(msg.consensusFile || msg.stage3?.consensus_file) && (
+                    <div className="consensus-file">
+                      📝 Consenso documentado en el repo:{' '}
+                      <code>{msg.consensusFile || msg.stage3.consensus_file}</code>
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
@@ -109,37 +152,73 @@ export default function ChatInterface({
             </div>
           ))
         )}
-
-        {isLoading && (
-          <div className="loading-indicator">
-            <div className="spinner"></div>
-            <span>Consulting the council...</span>
-          </div>
-        )}
-
         <div ref={messagesEndRef} />
       </div>
 
-      {conversation.messages.length === 0 && (
-        <form className="input-form" onSubmit={handleSubmit}>
+      <form className="input-form" onSubmit={handleSubmit}>
+        <div className="input-col">
           <textarea
             className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+            placeholder={
+              conversation.messages.length === 0
+                ? 'Tu pregunta… (Shift+Enter nueva línea, Enter envía)'
+                : 'Seguí la conversación… (el consejo recuerda los turnos previos)'
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
             rows={3}
           />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
-        </form>
-      )}
+          <div className="input-actions">
+            <div className="toggles">
+            <label
+              className="write-toggle"
+              title="Ronda 0: antes de deliberar, el investigador busca info actual en la web y se la pasa a todo el consejo"
+            >
+              <input
+                type="checkbox"
+                checked={research}
+                onChange={(e) => setResearch(e.target.checked)}
+              />
+              🔎 Ronda de búsqueda previa
+            </label>
+            <label
+              className={`write-toggle ${!currentRepo ? 'disabled' : ''}`}
+              title={currentRepo
+                ? 'Habilita el botón para que el chairman escriba el consenso en docs/council/ del repo'
+                : 'Seleccioná un repo para habilitar la escritura'}
+            >
+              <input
+                type="checkbox"
+                checked={writeConsensus && !!currentRepo}
+                disabled={!currentRepo}
+                onChange={(e) => setWriteConsensus(e.target.checked)}
+              />
+              ✍️ Permitir documentar el consenso en el repo
+            </label>
+            </div>
+            <button
+              type="button"
+              className="document-button"
+              disabled={!canDocument}
+              onClick={() => onDocumentConsensus()}
+              title={
+                !writeConsensus ? 'Marcá la casilla para habilitar'
+                  : !currentRepo ? 'Seleccioná un repo'
+                  : !hasConsensus ? 'Primero el consejo tiene que llegar a un consenso'
+                  : alreadyDocumented ? 'Este consenso ya fue documentado'
+                  : `El chairman escribirá el consenso en ${currentRepo}/docs/council/`
+              }
+            >
+              {isDocumenting ? '📝 Generando…' : '📝 Documentar lo decidido'}
+            </button>
+          </div>
+        </div>
+        <button type="submit" className="send-button" disabled={!input.trim() || isLoading}>
+          {isLoading ? 'Deliberando…' : 'Enviar'}
+        </button>
+      </form>
     </div>
   );
 }

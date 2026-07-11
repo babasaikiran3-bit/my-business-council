@@ -6,7 +6,15 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  onDeleteConversation,
 }) {
+  const handleDelete = (e, conv) => {
+    e.stopPropagation(); // no seleccionar la conversación al borrar
+    if (window.confirm(`¿Borrar "${conv.title || 'New Conversation'}"? Esta acción no se puede deshacer.`)) {
+      onDeleteConversation(conv.id);
+    }
+  };
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
@@ -28,12 +36,21 @@ export default function Sidebar({
               }`}
               onClick={() => onSelectConversation(conv.id)}
             >
-              <div className="conversation-title">
-                {conv.title || 'New Conversation'}
+              <div className="conversation-body">
+                <div className="conversation-title">
+                  {conv.title || 'New Conversation'}
+                </div>
+                <div className="conversation-meta">
+                  {conv.message_count} messages
+                </div>
               </div>
-              <div className="conversation-meta">
-                {conv.message_count} messages
-              </div>
+              <button
+                className="delete-conversation-btn"
+                title="Borrar conversación"
+                onClick={(e) => handleDelete(e, conv)}
+              >
+                🗑
+              </button>
             </div>
           ))
         )}

@@ -1,26 +1,21 @@
-"""Configuration for the LLM Council."""
+"""Configuración del LLM Council.
 
-import os
-from dotenv import load_dotenv
+El universo de modelos vive en models_registry.py; la selección activa (members/chairman)
+se persiste vía council_config.py. Acá quedan solo constantes globales y re-exports cómodos.
+"""
 
-load_dotenv()
+from .models_registry import (  # noqa: F401  (re-export)
+    REGISTRY,
+    DEFAULT_MEMBERS,
+    DEFAULT_CHAIRMAN,
+    TITLE_MODEL,
+)
 
-# OpenRouter API key
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-# Council members - list of OpenRouter model identifiers
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-# Chairman model - synthesizes final response
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-
-# OpenRouter API endpoint
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-# Data directory for conversation storage
+# Directorio de almacenamiento de conversaciones (JSON legacy; usado por la migración).
 DATA_DIR = "data/conversations"
+
+# Base de datos SQLite (almacenamiento principal de conversaciones).
+DB_PATH = "data/council.db"
+
+# Archivo de configuración del consejo (members + chairman activos).
+COUNCIL_CONFIG_PATH = "data/council_config.json"

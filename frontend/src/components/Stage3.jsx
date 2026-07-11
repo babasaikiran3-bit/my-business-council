@@ -7,8 +7,8 @@ export default function Stage3({ finalResponse }) {
   }
 
   return (
-    <div className="stage stage3">
-      <h3 className="stage-title">Stage 3: Final Council Answer</h3>
+    <details className="stage stage3" open>
+      <summary className="stage-title">Stage 3: Final Council Answer</summary>
       <div className="final-response">
         <div className="chairman-label">
           Chairman: {finalResponse.model.split('/')[1] || finalResponse.model}
@@ -17,6 +17,6 @@ export default function Stage3({ finalResponse }) {
           <ReactMarkdown>{finalResponse.response}</ReactMarkdown>
         </div>
       </div>
-    </div>
+    </details>
   );
 }

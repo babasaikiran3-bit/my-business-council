@@ -6,6 +6,33 @@
   background: #ffffff;
 }
 
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fbfcfe;
+}
+
+.chat-header .repo-selector {
+  flex: 1;
+  border-bottom: none;
+  padding: 0;
+  background: transparent;
+}
+
+.stage-error {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  color: #c53030;
+  font-size: 14px;
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;
@@ -107,6 +134,139 @@
   padding: 24px;
   border-top: 1px solid #e0e0e0;
   background: #fafafa;
+}
+
+.input-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Etapas colapsables (Stage 1/2/3 usan <details>/<summary>) */
+summary.stage-title {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+summary.stage-title::-webkit-details-marker { display: none; }
+
+summary.stage-title::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 8px;
+  color: #a0aec0;
+  transition: transform 0.15s;
+}
+
+details[open] > summary.stage-title::before {
+  transform: rotate(90deg);
+}
+
+summary.stage-title:hover { opacity: 0.85; }
+
+.research-brief {
+  margin: 12px 0;
+  border: 1px solid #cfe3d4;
+  border-radius: 10px;
+  background: #f3fbf5;
+  padding: 6px 14px;
+}
+
+.research-brief > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: #2f7d4f;
+  padding: 6px 0;
+  user-select: none;
+}
+
+.research-brief .research-by {
+  color: #94a3a0;
+  font-weight: 400;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.research-brief .markdown-content {
+  border-top: 1px solid #dceee1;
+  margin-top: 4px;
+}
+
+.write-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #4a5568;
+  cursor: pointer;
+  user-select: none;
+}
+
+.document-button {
+  padding: 8px 16px;
+  border: 1px solid #38a169;
+  border-radius: 8px;
+  background: #38a169;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.document-button:hover:not(:disabled) {
+  background: #2f855a;
+  border-color: #2f855a;
+}
+
+.document-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #cbd5e0;
+  border-color: #cbd5e0;
+}
+
+.write-toggle input { cursor: pointer; }
+
+.write-toggle.disabled {
+  color: #a0aec0;
+  cursor: not-allowed;
+}
+.write-toggle.disabled input { cursor: not-allowed; }
+
+.consensus-file {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  color: #276749;
+  font-size: 14px;
+}
+
+.consensus-file code {
+  background: #c6f6d5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 .message-input {
