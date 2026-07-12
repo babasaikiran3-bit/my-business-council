@@ -1308,3 +1308,168 @@ class TestStreamLoopTaskCleanup:
         finally:
             loop.set_debug(old_debug)
             loop.set_exception_handler(old_handler)
+
+    @pytest.mark.asyncio
+    async def test_external_cancellation_during_wait_cleans_up_tasks(self):
+        """External CancelledError injected into asyncio.wait must cancel and
+        await every created read_task/cancel_task before re-raising.
+
+        This is the deterministic regression test for the coroutine-
+        cancellation task-leak defect: when executor.run is cancelled
+        externally while _stream_loop is blocked on asyncio.wait, the
+        try/except wrapper must call _cancel_and_await on *all* created
+        tasks so no helper task remains pending.
+        """
+        loop = asyncio.get_running_loop()
+        old_debug = loop.get_debug()
+        loop.set_debug(True)
+
+        handlers: list = []
+
+        def _handler(lp, ctx):
+            handlers.append(ctx)
+
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(_handler)
+
+        try:
+            # Process sleeps after one line — the executor will be blocked
+            # in asyncio.wait when external cancellation arrives.
+            script = (
+                "import sys, time\n"
+                "print('{\"text\": \"first\"}')\n"
+                "sys.stdout.flush()\n"
+                "time.sleep(60)\n"
+            )
+            executor = WorkerExecutor(
+                [PYTHON, "-c", script], _null_parser, "m",
+                inactivity_timeout=30.0,
+            )
+
+            evts: List[Dict[str, Any]] = []
+
+            run_task = asyncio.create_task(executor.run(lambda e: evts.append(e)))
+
+            # Let the first line arrive, so the executor enters the next
+            # asyncio.wait iteration.
+            await asyncio.sleep(0.3)
+            run_task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await run_task
+
+            # Let the event loop settle so any delayed GC-pending warnings fire.
+            await asyncio.sleep(0.2)
+
+            # No "destroyed but pending" messages must appear.
+            pending_msgs = [
+                c for c in handlers
+                if "destroyed" in str(c.get("message", ""))
+                and "pending" in str(c.get("message", ""))
+            ]
+            assert len(pending_msgs) == 0, (
+                f"Pending-task destruction warnings after external cancellation: {pending_msgs}"
+            )
+        finally:
+            loop.set_debug(old_debug)
+            loop.set_exception_handler(old_handler)
+
+
+# ---------------------------------------------------------------------------
+# Regression test: SIGTERM-resistant descendant cleanup
+# ---------------------------------------------------------------------------
+
+class TestSigtermResistantDescendants:
+    """Fix: _terminate_and_reap must SIGKILL descendants that ignore SIGTERM
+    even when the leader has already exited."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.posix
+    async def test_sigterm_resistant_child_killed_by_sigkill(self, monkeypatch):
+        """A forked child that ignores SIGTERM must be removed by SIGKILL.
+
+        The leader exits quickly (returncode already set when
+        _terminate_and_reap runs).  The child ignores SIGTERM explicitly
+        and closes inherited fds so pipe EOF arrives.  After the bounded
+        grace interval the executor must escalate to SIGKILL and kill
+        the orphan.
+        """
+        monkeypatch.setattr("backend.worker_executor._KILL_GRACE", 0.3)
+
+        import tempfile
+
+        pid_file = tempfile.mktemp(suffix=".pid")
+
+        script = (
+            "import os, sys, signal, time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    # Child: ignore SIGTERM, write PID, close inherited fds.\n"
+            f"    with open({json.dumps(pid_file)}, 'w') as f:\n"
+            "        f.write(str(os.getpid()))\n"
+            "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "    os.close(0)\n"
+            "    os.close(1)\n"
+            "    os.close(2)\n"
+            "    # Busy-wait until killed by SIGKILL.\n"
+            "    while True:\n"
+            "        time.sleep(0.1)\n"
+            "# Leader: produce one result line and exit immediately.\n"
+            "print('{\"result\": \"leader done\"}')\n"
+            "sys.stdout.flush()\n"
+            "sys.exit(0)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+
+        # Leader exited cleanly; executor outcome must reflect that.
+        assert result.outcome == WorkerOutcome.COMPLETED
+        assert result.returncode == 0
+
+        # Read the child PID and verify it is dead.
+        child_pid_str = None
+        try:
+            with open(pid_file) as f:
+                child_pid_str = f.read().strip()
+        except OSError:
+            pass
+        finally:
+            try:
+                os.remove(pid_file)
+            except OSError:
+                pass
+
+        if child_pid_str:
+            child_pid = int(child_pid_str)
+            import signal as _signal
+
+            child_dead = False
+            for _ in range(30):  # poll up to ~1.5 s
+                try:
+                    os.kill(child_pid, 0)
+                    # Process exists — distinguish zombie from running.
+                    try:
+                        with open(f"/proc/{child_pid}/stat") as sf:
+                            state = sf.read().split()[2]
+                        if state == "Z":
+                            child_dead = True  # zombie, cleanup worked
+                            break
+                    except OSError:
+                        pass  # /proc entry may race with exit
+                    await asyncio.sleep(0.05)
+                except (ProcessLookupError, OSError):
+                    child_dead = True
+                    break
+
+            if not child_dead:
+                try:
+                    os.kill(child_pid, _signal.SIGKILL)
+                except OSError:
+                    pass
+                pytest.fail(
+                    f"SIGTERM-resistant child {child_pid} survived executor "
+                    "completion. SIGKILL escalation in _terminate_and_reap failed."
+                )

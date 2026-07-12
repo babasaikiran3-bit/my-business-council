@@ -24,6 +24,7 @@ import asyncio
 import os
 import signal
 import json
+import time as _time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -148,9 +149,24 @@ async def _terminate_and_reap(proc: asyncio.subprocess.Process) -> Optional[int]
         return proc.returncode  # process group already gone
 
     if proc.returncode is not None:
-        # Leader already exited.  We've done our best by signalling the
-        # process group — children will receive SIGTERM.
-        return proc.returncode
+        # Leader already exited.  Poll the dedicated process group for a
+        # bounded grace interval so SIGTERM-resistant descendants are
+        # given a chance to exit.  Escalate to SIGKILL if any survive.
+        leader_rc = proc.returncode
+        deadline = _time.monotonic() + _KILL_GRACE
+        while _time.monotonic() < deadline:
+            try:
+                os.killpg(pid, 0)
+            except (ProcessLookupError, OSError):
+                break  # process group is gone — nothing left to kill
+            await asyncio.sleep(0.05)
+        else:
+            # Grace period expired; some descendants survived SIGTERM.
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        return leader_rc
 
     try:
         return await asyncio.wait_for(proc.wait(), timeout=_KILL_GRACE)
@@ -367,11 +383,18 @@ class WorkerExecutor:
             else:
                 cancel_task = None
 
-            done, pending = await asyncio.wait(
-                wait_tasks,
-                timeout=self._inactivity_timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            try:
+                done, pending = await asyncio.wait(
+                    wait_tasks,
+                    timeout=self._inactivity_timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            except asyncio.CancelledError:
+                # External cancellation while waiting — every created
+                # helper task must be cancelled and awaited before
+                # re-raising, otherwise they leak as pending tasks.
+                await _cancel_and_await(*wait_tasks)
+                raise
 
             # --- classify what happened ----------------------------------
             if not done:
