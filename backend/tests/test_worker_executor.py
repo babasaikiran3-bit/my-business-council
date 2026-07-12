@@ -1473,3 +1473,66 @@ class TestSigtermResistantDescendants:
                     f"SIGTERM-resistant child {child_pid} survived executor "
                     "completion. SIGKILL escalation in _terminate_and_reap failed."
                 )
+
+    @pytest.mark.asyncio
+    @pytest.mark.posix
+    async def test_sigterm_resistant_child_killed_while_leader_is_live(self, monkeypatch):
+        """Reaping the leader after SIGTERM must not skip SIGKILL for descendants."""
+        monkeypatch.setattr("backend.worker_executor._KILL_GRACE", 0.3)
+
+        import tempfile
+
+        pid_file = tempfile.mktemp(suffix=".pid")
+        script = (
+            "import os, sys, signal, time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            f"    with open({json.dumps(pid_file)}, 'w') as f:\n"
+            "        f.write(str(os.getpid()))\n"
+            "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "    os.close(0); os.close(1); os.close(2)\n"
+            "    while True: time.sleep(0.1)\n"
+            "print('{\"result\": \"leader waiting\"}')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(60)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=0.2,
+        )
+        result, _ = await _collect_events(executor)
+
+        assert result.outcome == WorkerOutcome.TIMED_OUT
+        assert result.returncode is not None
+
+        try:
+            with open(pid_file) as f:
+                child_pid = int(f.read().strip())
+        finally:
+            try:
+                os.remove(pid_file)
+            except OSError:
+                pass
+
+        child_dead = False
+        for _ in range(30):
+            try:
+                os.kill(child_pid, 0)
+                try:
+                    with open(f"/proc/{child_pid}/stat") as sf:
+                        if sf.read().split()[2] == "Z":
+                            child_dead = True
+                            break
+                except OSError:
+                    pass
+                await asyncio.sleep(0.05)
+            except (ProcessLookupError, OSError):
+                child_dead = True
+                break
+
+        if not child_dead:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except OSError:
+                pass
+        assert child_dead, f"SIGTERM-resistant child {child_pid} survived cleanup"

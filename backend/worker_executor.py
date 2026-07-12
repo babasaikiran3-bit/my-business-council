@@ -148,41 +148,30 @@ async def _terminate_and_reap(proc: asyncio.subprocess.Process) -> Optional[int]
     except (ProcessLookupError, OSError):
         return proc.returncode  # process group already gone
 
-    if proc.returncode is not None:
-        # Leader already exited.  Poll the dedicated process group for a
-        # bounded grace interval so SIGTERM-resistant descendants are
-        # given a chance to exit.  Escalate to SIGKILL if any survive.
-        leader_rc = proc.returncode
-        deadline = _time.monotonic() + _KILL_GRACE
-        while _time.monotonic() < deadline:
-            try:
-                os.killpg(pid, 0)
-            except (ProcessLookupError, OSError):
-                break  # process group is gone — nothing left to kill
-            await asyncio.sleep(0.05)
-        else:
-            # Grace period expired; some descendants survived SIGTERM.
-            try:
-                os.killpg(pid, signal.SIGKILL)
-            except (ProcessLookupError, OSError):
-                pass
-        return leader_rc
+    # Wait for the *whole process group* to disappear, not just its leader.
+    # A leader may exit promptly on SIGTERM while a descendant ignores it.
+    deadline = _time.monotonic() + _KILL_GRACE
+    while _time.monotonic() < deadline:
+        try:
+            os.killpg(pid, 0)
+        except (ProcessLookupError, OSError):
+            if proc.returncode is None:
+                return await _reap(proc)
+            return proc.returncode
+        await asyncio.sleep(min(0.05, max(0.0, deadline - _time.monotonic())))
 
-    try:
-        return await asyncio.wait_for(proc.wait(), timeout=_KILL_GRACE)
-    except asyncio.TimeoutError:
-        pass
-
-    # ── SIGKILL escalation ───────────────────────────────────────────
+    # ── SIGKILL escalation for any surviving group member ────────────
     try:
         os.killpg(pid, signal.SIGKILL)
     except (ProcessLookupError, OSError):
-        return proc.returncode
+        pass
 
-    try:
-        return await asyncio.wait_for(proc.wait(), timeout=_KILL_GRACE)
-    except asyncio.TimeoutError:
-        return None
+    if proc.returncode is None:
+        try:
+            return await asyncio.wait_for(proc.wait(), timeout=_KILL_GRACE)
+        except asyncio.TimeoutError:
+            return None
+    return proc.returncode
 
 
 async def _drain_stderr_safely(task: asyncio.Task) -> str:
