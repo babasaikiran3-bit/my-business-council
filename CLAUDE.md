@@ -4,16 +4,18 @@ This file contains technical details, architectural decisions, and important imp
 
 ## Project Overview
 
-LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
+LLM Council is a 4-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites. Stage 0 (optional) gathers current web research before the council deliberates.
 
 ## Architecture
 
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
-- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Re-exports model defaults (`DEFAULT_MEMBERS`, `DEFAULT_CHAIRMAN`, `TITLE_MODEL`)
+  from `models_registry.py` and deterministic paths from `paths.py`
+  (`DB_PATH`, `DATA_DIR`, `COUNCIL_CONFIG_PATH`, `AGENT_CWD`).
+- No `.env` file; provider keys live in individual files
+  (`~/.deepseek_key`, `~/.aiapi_key`) read at execution time by `providers.py`.
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
 **`paths.py`** — Deterministic data paths (ADR 0002 §2)
@@ -39,14 +41,37 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
   3. `add_message_position_unique` — unique index on `(conversation_id, position)`
 - `storage.init_db()` delegates to `migrations.migrate()`; no more ad-hoc DDL.
 
-**`openrouter.py`**
-- `query_model()`: Single async model query
-- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
-- Returns dict with 'content' and optional 'reasoning_details'
-- Graceful degradation: returns None on failure, continues with successful responses
+**`providers.py`** — Data-driven provider dispatch (replaces the deleted `openrouter.py`)
+- `query_model()` / `query_models_parallel()`: route a model id to its transport.
+- Three transports resolved from `models_registry.py`:
+  - `cli_native` — local agent binary (`claude`, `codex`, `agy`) with filesystem access
+  - `anthropic_agent` — Claude Code pointed at an Anthropic-compatible API (DeepSeek, GLM, etc.)
+  - `openai_api` — blind REST POST, no tools (titles only)
+- `allow_write` flag toggles codex sandbox between `read-only` (default) and
+  `workspace-write`. Claude, agy, and anthropic_agent already run with
+  `--dangerously-skip-permissions` (full user-level write authority), so the
+  flag does not create their write capability — it is only relevant for codex.
+- Graceful degradation: returns None on failure, continues with successful responses.
+
+**`models_registry.py`** — Declarative model universe
+- `REGISTRY` dict maps model ids to transport specs (bin, key_file, base URL, model name).
+- `DEFAULT_MEMBERS` / `DEFAULT_CHAIRMAN` define the out-of-box council.
+- To add a model, add its entry here — no logic changes needed.
+
+**`council_config.py`** — Active council selection + health checks
+- Persists active members + chairman to `data/council_config.json`.
+- `health()` checks binary/key availability without network calls.
+- `load_config()` filters out unavailable models; `validate_config()` rejects
+  unknown or unhealthy models on PUT.
+
+**`streaming.py`** — Live SSE event emission for Stage 1
+- Wraps each provider's native event format into canonical SSE events via `WorkerExecutor`.
+- Parsers: `parse_claude_event` (stream-json), `parse_codex_event` (--json).
+- Gemini has no event stream → falls back to batch with working→done emission.
 
 **`council.py`** - The Core Logic
-- `stage1_collect_responses()`: Parallel queries to all council models
+- `stage0_research()`: Research officer gathers current web facts before deliberation.
+- `stage1_collect_responses()`: Parallel queries to all council models (batch mode).
 - `stage2_collect_rankings()`:
   - Anonymizes responses as "Response A, B, C, etc."
   - Creates `label_to_model` mapping for de-anonymization
@@ -54,8 +79,16 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
   - Returns tuple: (rankings_list, label_to_model_dict)
   - Each ranking includes both raw text and `parsed_ranking` list
 - `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
-- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
-- `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+  (always read-only; consensus write is a separate post-deliberation action).
+- `generate_consensus_doc()`: Chairman generates (does not write) a consensus markdown
+  document for preview before approval.
+- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both
+  numbered lists and plain format.
+- `calculate_aggregate_rankings()`: Computes average rank position across all
+  peer evaluations.
+- `run_full_council()`: Batch orchestration (used by CLI `debate.py`).
+- `run_full_council_streaming()`: SSE orchestration with per-agent live events.
+- `generate_conversation_title()`: Auto-titles new conversations via a cheap model.
 
 **`storage.py`**
 - SQLite-based conversation storage in `data/council.db` (path from `paths.py`)
@@ -66,7 +99,9 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
   connection via ``with _connect()``.
 - Conversation format: `{id, created_at, title, repo_path, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- Note: metadata (label_to_model, aggregate_rankings) is persisted to storage
+  when the caller provides it to ``add_assistant_message()`` (the optional
+  ``metadata`` parameter is serialized into the message data JSON)
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
@@ -77,8 +112,11 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 
 **`App.jsx`**
 - Main orchestration: manages conversations list and current conversation
-- Handles message sending and metadata storage
-- Important: metadata is stored in the UI state for display but not persisted to backend JSON
+- Handles message sending, SSE event dispatch, and metadata storage
+- Important: metadata (label_to_model, aggregate_rankings) is stored in UI state
+  for display and also persisted to backend storage when the API includes it
+  (``add_assistant_message`` accepts an optional ``metadata`` parameter that is
+  serialized into the message data JSON)
 
 **`components/ChatInterface.jsx`**
 - Multiline textarea (3 rows, resizable)
@@ -121,7 +159,7 @@ This strict format allows reliable parsing while still getting thoughtful evalua
 
 ### De-anonymization Strategy
 - Models receive: "Response A", "Response B", etc.
-- Backend creates mapping: `{"Response A": "openai/gpt-5.1", ...}`
+- Backend creates mapping: `{"Response A": "claude", "Response B": "codex", ...}`
 - Frontend displays model names in **bold** for readability
 - Users see explanation that original evaluation used anonymous labels
 - This prevents bias while maintaining transparency
@@ -150,24 +188,88 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 ### Markdown Rendering
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
 
+### WorkerExecutor Lifecycle (ADR 0002 §3-4)
+Subprocess execution is managed by `backend/worker_executor.py`:
+- Each worker runs in its own process group (`start_new_session=True`).
+- stdout and stderr are consumed concurrently (no stderr pipe stall).
+- Terminal states: `completed | failed | timed_out | cancelled`.
+- `CancellationToken` supports cooperative cancellation; SIGTERM then SIGKILL
+  escalation on the process group.
+- Temp files are cleaned up even on exception paths (by the caller —
+  ``streaming.py`` / ``providers.py``; WorkerExecutor only reads the file,
+  it does not create or delete it).
+- `final_file` option reads result from a sidecar file after completion (used
+  by codex `-o`).
+- `inactivity_timeout` kills workers that produce no output for N seconds.
+
+### Consensus Write Flow (ADR 0001)
+Consensus documentation is a three-step, human-gated workflow:
+1. **Preview** (`POST .../document-consensus`) — chairman generates markdown
+   read-only; no file is written. The draft is stored in the message as
+   `pending_consensus`.
+2. **Approve** (`POST .../document-consensus/approve`) — the *backend* writes
+   the approved content to `docs/council/<slug>.md` inside the repo. Path is
+   forced to that subdirectory (anti-traversal).
+3. **Discard** (`POST .../document-consensus/discard`) — drops the draft.
+
+### Security: Dangerous Flags Grant Real Authority
+
+During deliberation (Stages 0–3), members launch with:
+
+- **Codex** — `--sandbox read-only` (technically enforces a read-only filesystem
+  view; `--sandbox workspace-write` when ``allow_write=True``).
+- **Claude, agy, and all anthropic_agent models** (DeepSeek, GLM, Kimi, Grok) —
+  `--dangerously-skip-permissions`, which bypasses the agent's own permission
+  prompts and gives them the **user's full filesystem authority**. They can
+  read, write, and modify files. The "read-only" deliberation property is
+  upheld by prompt instructions and flow design, not a technical enforcement
+  boundary.
+
+`--dangerously-skip-permissions` and `--sandbox workspace-write` are CLI-level
+flags, not a security sandbox. `--dangerously-skip-permissions` gives the agent
+the same filesystem access as your user account. Always review ``git diff``
+after any session where an agent had write access.
+
+**No-push is a policy, not a programmatic boundary.** Workers do not push to
+remotes under normal operation because the prompts and flow never authorize it.
+There is no network-level or git-hook enforcement. Push, force-push, and
+destructive Git operations are only guarded by the prompt instructions given to
+each agent.
+
+**Consensus approval is the only intended application write flow** (ADR 0001),
+but it is not an OS sandbox guarantee — it writes to ``docs/council/<slug>.md``
+inside the validated repo path.
+
 ### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+Models are defined declaratively in `backend/models_registry.py` (the universe).
+Active members and chairman are persisted to `data/council_config.json` via the
+UI (⚙️ Models panel) or directly via `PUT /api/council/config`. The current
+default chairman is Claude (`"claude"`). `DEFAULT_MEMBERS` = `["claude", "codex",
+"gemini", "deepseek"]`.
 
 ## Common Gotchas
 
 1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
-4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+4. **Missing Metadata**: Metadata is persisted to the DB when provided to
+   ``add_assistant_message()``. If metadata is missing from a stored message,
+   the API caller did not supply it at write time.
 
 ## Future Enhancement Ideas
 
-- Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
+- **Room mode (ADR 0003):** persistent multi-agent conversations with turn-taking,
+  parallel code tasks in isolated Git worktrees. Not yet implemented; blocked on
+  ADR 0002 stabilization gate.
 - Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
-- Support for reasoning models (o1, etc.) with special handling
+- Support for reasoning models with special handling
+
+Already implemented:
+- ✅ Configurable council/chairman via UI (⚙️ Models panel, persisted to `council_config.json`)
+- ✅ Streaming responses via SSE (Stage 1 live events: thoughts, tools, results)
+- ✅ Research stage (Stage 0) — optional web research before deliberation
 
 ## Testing Notes
 
@@ -178,7 +280,7 @@ or API keys are consumed.
 
 Run:
 ```bash
-uv run pytest tests/ -v
+uv run pytest tests/ backend/tests/ -v
 ```
 
 Backend import sanity check:
@@ -191,13 +293,15 @@ uv run python -c "from backend import storage, migrations, paths; print('OK')"
 ```
 User Query
     ↓
-Stage 1: Parallel queries → [individual responses]
+Stage 0 (optional): Research officer gathers current web facts → research brief
+    ↓
+Stage 1: Parallel agent queries with live SSE → [individual responses]
     ↓
 Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankings]
     ↓
 Aggregate Rankings Calculation → [sorted by avg position]
     ↓
-Stage 3: Chairman synthesis with full context
+Stage 3: Chairman synthesis with full context (read-only)
     ↓
 Return: {stage1, stage2, stage3, metadata}
     ↓
