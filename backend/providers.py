@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 import httpx
 
 from .models_registry import REGISTRY
+from .config import AGENT_CWD  # absoluto, pathlib-based (ver backend/paths.py)
 
 
 # --- Resolución de binarios -------------------------------------------------
@@ -30,7 +31,6 @@ def resolve_bin(name: str) -> str:
 
 
 # Directorio de trabajo neutro para Q&A sin repo (evita que los agentes escaneen).
-AGENT_CWD = os.path.join(os.path.dirname(__file__), "..", "data", "agent-cwd")
 os.makedirs(AGENT_CWD, exist_ok=True)
 
 CLI_TIMEOUT = 300.0

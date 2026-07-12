@@ -2,6 +2,10 @@
 
 El universo de modelos vive en models_registry.py; la selección activa (members/chairman)
 se persiste vía council_config.py. Acá quedan solo constantes globales y re-exports cómodos.
+
+Los paths de datos se definen de forma determinista en paths.py (absolutos, con override
+por variables de entorno).  Se re-exportan acá para mantener compatibilidad con código
+existente que importa ``from .config import DB_PATH, ...``.
 """
 
 from .models_registry import (  # noqa: F401  (re-export)
@@ -11,11 +15,10 @@ from .models_registry import (  # noqa: F401  (re-export)
     TITLE_MODEL,
 )
 
-# Directorio de almacenamiento de conversaciones (JSON legacy; usado por la migración).
-DATA_DIR = "data/conversations"
-
-# Base de datos SQLite (almacenamiento principal de conversaciones).
-DB_PATH = "data/council.db"
-
-# Archivo de configuración del consejo (members + chairman activos).
-COUNCIL_CONFIG_PATH = "data/council_config.json"
+# Re-export de paths deterministas (ver backend/paths.py).
+from .paths import (  # noqa: F401  (re-export)
+    DB_PATH,
+    DATA_DIR,
+    COUNCIL_CONFIG_PATH,
+    AGENT_CWD,
+)

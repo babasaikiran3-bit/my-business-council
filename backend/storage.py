@@ -1,10 +1,11 @@
 """SQLite-based storage for conversations.
 
 Esquema:
-  conversations(id TEXT PK, created_at TEXT, title TEXT)
+  conversations(id TEXT PK, created_at TEXT, title TEXT, repo_path TEXT)
   messages(id INTEGER PK, conversation_id TEXT FK, position INT, role TEXT, data TEXT/JSON)
+  _migrations(version INT PK, name TEXT, applied_at TEXT)
 
-`data` (JSON) por rol:
+``data`` (JSON) por rol:
   user      -> {"content": "..."}
   assistant -> {"stage1": [...], "stage2": [...], "stage3": {...}, "metadata": {...}}
 
@@ -12,55 +13,51 @@ La interfaz pública es idéntica a la versión JSON previa; el resto del backen
 """
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from .config import DB_PATH
 
-
-# --- Conexión / esquema -----------------------------------------------------
+# ---------------------------------------------------------------------------
+# Conexión / esquema
+# ---------------------------------------------------------------------------
 
 def _connect() -> sqlite3.Connection:
+    """Open (or create) the database with integrity and concurrency settings."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 def init_db():
-    """Crea las tablas si no existen. Idempotente."""
-    import os
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    """Ensure the database file, directory, and schema exist.  Idempotent.
+
+    Schema changes past the bootstrap are applied via the ordered migration
+    mechanism (see ``backend/migrations.py``).
+
+    Supported *DB_PATH* forms:
+
+    * Filesystem path (absolute or resolved by ``paths.py`` to absolute) —
+      parent directories are created automatically.
+    * ``:memory:`` — in-memory database; no filesystem operations are
+      performed.  Data is lost when every connection closes.
+    """
+    if DB_PATH != ":memory:":
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
     with _connect() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS conversations (
-                id         TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                title      TEXT NOT NULL DEFAULT 'New Conversation',
-                repo_path  TEXT
-            );
-            CREATE TABLE IF NOT EXISTS messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                position        INTEGER NOT NULL,
-                role            TEXT NOT NULL,
-                data            TEXT NOT NULL,
-                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_messages_conv
-                ON messages(conversation_id, position);
-            """
-        )
-        # Migración para DBs creadas antes de la columna repo_path.
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
-        if "repo_path" not in cols:
-            conn.execute("ALTER TABLE conversations ADD COLUMN repo_path TEXT")
+        from . import migrations  # noqa: F811 — register + run
+        _ = migrations.migrate(conn)
 
 
-# --- Helpers ----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _row_to_message(row: sqlite3.Row) -> Dict[str, Any]:
     data = json.loads(row["data"])
@@ -75,7 +72,9 @@ def _next_position(conn: sqlite3.Connection, conversation_id: str) -> int:
     return cur.fetchone()["pos"]
 
 
-# --- API pública ------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Public API — unchanged signatures, same behaviour as the legacy JSON version
+# ---------------------------------------------------------------------------
 
 def create_conversation(conversation_id: str, repo_path: Optional[str] = None) -> Dict[str, Any]:
     """Crea una conversación nueva y devuelve su dict."""
