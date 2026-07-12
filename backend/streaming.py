@@ -7,6 +7,10 @@ Normaliza los formatos de evento de cada CLI a un esquema único (ver SSD §6.3)
 
 El callback `emit(event: dict)` lo provee el llamador (main.py lo conecta a una Queue/SSE).
 Cada `run_agent_stream` devuelve el texto final del agente (para armar stage1_results).
+
+El ciclo de vida del subproceso se delegó en WorkerExecutor (ADR 0002 §3).  Esta capa
+solo resuelve transporte, arma argumentos y traduce resultados a los mismos eventos SSE
+que el frontend ya consume.
 """
 
 import os
@@ -18,6 +22,9 @@ from typing import Optional, Callable, Dict, Any, List, Tuple
 from .models_registry import REGISTRY
 from .providers import (
     resolve_bin, anthropic_agent_env, _query_cli_native, AGENT_CWD, CLI_TIMEOUT,
+)
+from .worker_executor import (
+    WorkerExecutor, WorkerOutcome, WorkerResult, CancellationToken,
 )
 
 Emit = Callable[[Dict[str, Any]], None]
@@ -33,6 +40,10 @@ def _short(s: Any, n: int = 120) -> str:
     s = str(s).replace("\n", " ").strip()
     return s if len(s) <= n else s[: n - 1] + "…"
 
+
+# ---------------------------------------------------------------------------
+# Parsers de eventos (sin cambios — contrato estable)
+# ---------------------------------------------------------------------------
 
 def parse_claude_event(obj: Dict[str, Any], model_id: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Evento de Claude Code (stream-json) → (eventos canónicos, texto_final|None)."""
@@ -86,66 +97,55 @@ def parse_codex_event(obj: Dict[str, Any], model_id: str) -> Tuple[List[Dict[str
     return events, final
 
 
-async def _stream_subprocess(argv, parser, model_id, emit, env=None, cwd=None,
-                             final_file: Optional[str] = None) -> Optional[str]:
-    """Lanza un subproceso, lee stdout línea a línea, parsea y emite. Devuelve texto final."""
-    run_env = {**os.environ, **env} if env else None
-    final_text: Optional[str] = None
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd or AGENT_CWD,
-            env=run_env,
-        )
-        try:
-            while True:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=CLI_TIMEOUT)
-                if not line:
-                    break
-                raw = line.decode(errors="replace").strip()
-                if not raw:
-                    continue
-                try:
-                    obj = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                evts, maybe_final = parser(obj, model_id)
-                for e in evts:
-                    emit(e)
-                if maybe_final is not None:
-                    final_text = maybe_final
-            await asyncio.wait_for(proc.wait(), timeout=30)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-    except Exception as e:
-        emit({"type": "agent", "model": model_id, "status": "error", "reason": str(e)})
-        return None
+# ---------------------------------------------------------------------------
+# Helpers para armar y despachar executors
+# ---------------------------------------------------------------------------
 
-    if final_file:
-        try:
-            with open(final_file) as f:
-                txt = f.read().strip()
-                if txt:
-                    final_text = txt
-        except OSError:
-            pass
+def _emit_error(emit: Emit, model_id: str, reason: str) -> None:
+    """Emite un evento de error de agente (preserva semántica SSE existente)."""
+    emit({"type": "agent", "model": model_id, "status": "error", "reason": reason})
 
-    return final_text
 
+async def _run_executor(
+    executor: WorkerExecutor, emit: Emit, model_id: str
+) -> Optional[str]:
+    """Ejecuta un WorkerExecutor y traduce su WorkerResult al contrato previo.
+
+    Emite exactamente un evento terminal de agente (``done`` o ``error``)
+    según el ``WorkerOutcome``, preservando los shapes de evento que el
+    frontend ya consume.
+    """
+    result = await executor.run(emit)
+
+    if result.outcome == WorkerOutcome.COMPLETED:
+        emit({"type": "agent", "model": model_id, "status": "done"})
+    elif result.outcome == WorkerOutcome.FAILED:
+        reason = result.error_message or f"exit code {result.returncode}"
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": reason})
+    elif result.outcome == WorkerOutcome.TIMED_OUT:
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": "timeout"})
+    elif result.outcome == WorkerOutcome.CANCELLED:
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": "cancelled"})
+
+    return result.final_text
+
+
+# ---------------------------------------------------------------------------
+# API pública
+# ---------------------------------------------------------------------------
 
 async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
                            cwd: Optional[str] = None) -> Optional[str]:
     """Corre un miembro del consejo emitiendo su progreso en vivo. Devuelve su texto final."""
     spec = REGISTRY.get(model_id)
     if spec is None:
-        emit({"type": "agent", "model": model_id, "status": "error", "reason": "modelo desconocido"})
+        _emit_error(emit, model_id, "modelo desconocido")
         return None
+
+    # Default to the neutral agent directory so the subprocess doesn't
+    # inherit the backend cwd (restores pre-WorkerExecutor behaviour).
+    if cwd is None:
+        cwd = AGENT_CWD
 
     emit({"type": "agent", "model": model_id, "status": "working"})
     transport = spec["transport"]
@@ -164,16 +164,17 @@ async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
             fd, path = tempfile.mkstemp(suffix=".txt", prefix="codex-", dir=AGENT_CWD)
             os.close(fd)
             try:
-                content = await _stream_subprocess(
+                executor = WorkerExecutor(
                     [binary, "exec", "--skip-git-repo-check", "--sandbox", "read-only",
                      "--json", "-o", path, prompt],
-                    parse_codex_event, model_id, emit, cwd=cwd, final_file=path)
+                    parse_codex_event, model_id,
+                    cwd=cwd, inactivity_timeout=CLI_TIMEOUT, final_file=path)
+                content = await _run_executor(executor, emit, model_id)
             finally:
                 try:
                     os.remove(path)
                 except OSError:
                     pass
-            emit({"type": "agent", "model": model_id, "status": "done"})
             return content
 
         # --- Claude y anthropic_agent (DeepSeek/GLM/...): stream-json ---
@@ -182,16 +183,16 @@ async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
         if transport == "anthropic_agent":
             env = anthropic_agent_env(spec)
             if env is None:
-                emit({"type": "agent", "model": model_id, "status": "error",
-                      "reason": f"falta {spec.get('key_file')}"})
+                _emit_error(emit, model_id, f"falta {spec.get('key_file')}")
                 return None
-        content = await _stream_subprocess(
+        executor = WorkerExecutor(
             [binary, "--dangerously-skip-permissions", "-p", "--verbose",
              "--output-format", "stream-json", prompt],
-            parse_claude_event, model_id, emit, env=env, cwd=cwd)
-        emit({"type": "agent", "model": model_id, "status": "done"})
+            parse_claude_event, model_id,
+            env=env, cwd=cwd, inactivity_timeout=CLI_TIMEOUT)
+        content = await _run_executor(executor, emit, model_id)
         return content
 
     except Exception as e:
-        emit({"type": "agent", "model": model_id, "status": "error", "reason": str(e)})
+        _emit_error(emit, model_id, str(e))
         return None
