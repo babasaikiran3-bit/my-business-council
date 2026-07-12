@@ -47,7 +47,10 @@ LLM Council is a 4-stage deliberation system where multiple LLMs collaboratively
   - `cli_native` — local agent binary (`claude`, `codex`, `agy`) with filesystem access
   - `anthropic_agent` — Claude Code pointed at an Anthropic-compatible API (DeepSeek, GLM, etc.)
   - `openai_api` — blind REST POST, no tools (titles only)
-- `allow_write` flag enables workspace-write sandbox on codex; ignored by other transports.
+- `allow_write` flag toggles codex sandbox between `read-only` (default) and
+  `workspace-write`. Claude, agy, and anthropic_agent already run with
+  `--dangerously-skip-permissions` (full user-level write authority), so the
+  flag does not create their write capability — it is only relevant for codex.
 - Graceful degradation: returns None on failure, continues with successful responses.
 
 **`models_registry.py`** — Declarative model universe
@@ -96,7 +99,9 @@ LLM Council is a 4-stage deliberation system where multiple LLMs collaboratively
   connection via ``with _connect()``.
 - Conversation format: `{id, created_at, title, repo_path, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- Note: metadata (label_to_model, aggregate_rankings) is persisted to storage
+  when the caller provides it to ``add_assistant_message()`` (the optional
+  ``metadata`` parameter is serialized into the message data JSON)
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
@@ -108,8 +113,10 @@ LLM Council is a 4-stage deliberation system where multiple LLMs collaboratively
 **`App.jsx`**
 - Main orchestration: manages conversations list and current conversation
 - Handles message sending, SSE event dispatch, and metadata storage
-- Important: metadata is stored in the UI state for display but not persisted to backend storage
-  (the DB stores stage1/2/3; label_to_model and aggregate_rankings are ephemeral API return values)
+- Important: metadata (label_to_model, aggregate_rankings) is stored in UI state
+  for display and also persisted to backend storage when the API includes it
+  (``add_assistant_message`` accepts an optional ``metadata`` parameter that is
+  serialized into the message data JSON)
 
 **`components/ChatInterface.jsx`**
 - Multiline textarea (3 rows, resizable)
@@ -188,8 +195,11 @@ Subprocess execution is managed by `backend/worker_executor.py`:
 - Terminal states: `completed | failed | timed_out | cancelled`.
 - `CancellationToken` supports cooperative cancellation; SIGTERM then SIGKILL
   escalation on the process group.
-- Temp files are cleaned up even on exception paths.
-- `final_file` option reads result from a sidecar file (used by codex `-o`).
+- Temp files are cleaned up even on exception paths (by the caller —
+  ``streaming.py`` / ``providers.py``; WorkerExecutor only reads the file,
+  it does not create or delete it).
+- `final_file` option reads result from a sidecar file after completion (used
+  by codex `-o`).
 - `inactivity_timeout` kills workers that produce no output for N seconds.
 
 ### Consensus Write Flow (ADR 0001)
@@ -202,12 +212,33 @@ Consensus documentation is a three-step, human-gated workflow:
    forced to that subdirectory (anti-traversal).
 3. **Discard** (`POST .../document-consensus/discard`) — drops the draft.
 
-### Security: Dangerous Flags Are Not a Sandbox
-`--dangerously-skip-permissions`, `--sandbox workspace-write`, and similar CLI
-flags are transport-level instructions, not a security boundary. The CLIs run
-with the user's full authority. Always review `git diff` after a session with
-write enabled. No worker pushes to remotes by default; push, force-push, and
-destructive Git operations are never authorized in current flows.
+### Security: Dangerous Flags Grant Real Authority
+
+During deliberation (Stages 0–3), members launch with:
+
+- **Codex** — `--sandbox read-only` (technically enforces a read-only filesystem
+  view; `--sandbox workspace-write` when ``allow_write=True``).
+- **Claude, agy, and all anthropic_agent models** (DeepSeek, GLM, Kimi, Grok) —
+  `--dangerously-skip-permissions`, which bypasses the agent's own permission
+  prompts and gives them the **user's full filesystem authority**. They can
+  read, write, and modify files. The "read-only" deliberation property is
+  upheld by prompt instructions and flow design, not a technical enforcement
+  boundary.
+
+`--dangerously-skip-permissions` and `--sandbox workspace-write` are CLI-level
+flags, not a security sandbox. `--dangerously-skip-permissions` gives the agent
+the same filesystem access as your user account. Always review ``git diff``
+after any session where an agent had write access.
+
+**No-push is a policy, not a programmatic boundary.** Workers do not push to
+remotes under normal operation because the prompts and flow never authorize it.
+There is no network-level or git-hook enforcement. Push, force-push, and
+destructive Git operations are only guarded by the prompt instructions given to
+each agent.
+
+**Consensus approval is the only intended application write flow** (ADR 0001),
+but it is not an OS sandbox guarantee — it writes to ``docs/council/<slug>.md``
+inside the validated repo path.
 
 ### Model Configuration
 Models are defined declaratively in `backend/models_registry.py` (the universe).
@@ -221,7 +252,9 @@ default chairman is Claude (`"claude"`). `DEFAULT_MEMBERS` = `["claude", "codex"
 1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
-4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+4. **Missing Metadata**: Metadata is persisted to the DB when provided to
+   ``add_assistant_message()``. If metadata is missing from a stored message,
+   the API caller did not supply it at write time.
 
 ## Future Enhancement Ideas
 
@@ -247,7 +280,7 @@ or API keys are consumed.
 
 Run:
 ```bash
-uv run pytest tests/ -v
+uv run pytest tests/ backend/tests/ -v
 ```
 
 Backend import sanity check:

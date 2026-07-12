@@ -117,6 +117,10 @@ roots (anti-path-traversal) before agents receive it as `cwd`.
 process-group cleanup, and waits for the backend to become healthy before
 reporting success.
 
+> **Note:** `council.sh` hardcodes `DIR="/home/andres/llm-council"` (line 5).
+> If you cloned the repository elsewhere, either edit that path or use
+> `start.sh` / the manual commands instead.
+
 ### start.sh (simple alternative)
 
 ```bash
@@ -156,8 +160,8 @@ Open **http://localhost:5173**.
 ### Tests
 
 ```bash
-# Backend (no real providers, no API keys consumed)
-uv run pytest tests/ -v
+# Backend (no real providers, no API keys consumed) — 121 tests total
+uv run pytest tests/ backend/tests/ -v
 
 # Frontend
 cd frontend && npm test && cd ..
@@ -184,7 +188,7 @@ uv run python -c "from backend import storage, migrations, paths; print('OK')"
 ### Full local gate
 
 ```bash
-uv run pytest tests/ -v && \
+uv run pytest tests/ backend/tests/ -v && \
   uv run python -c "from backend import storage, migrations, paths; print('OK')" && \
   cd frontend && npm run lint && npm run build && cd .. && \
   git diff --check
@@ -192,23 +196,35 @@ uv run pytest tests/ -v && \
 
 ## Security
 
-**The council is read-only by default.** Agents explore repositories but
-cannot write, push, or modify files during deliberation (Stages 0–3).
+**Read-only by policy, not by OS sandbox.** During deliberation (Stages 0–3):
+
+- **Codex** runs with `--sandbox read-only`, which technically enforces a
+  read-only filesystem view.
+- **Claude, agy, and all anthropic_agent models** (DeepSeek, GLM, Kimi,
+  Grok) are launched with `--dangerously-skip-permissions`, which bypasses
+  the agent's own permission prompts and gives them the **user's full
+  filesystem authority**. They can write, modify, or delete files. The
+  "read-only" property is upheld by prompt instructions and flow design,
+  not by a technical enforcement boundary.
 
 - **Consensus write is opt-in and staged.** You must (a) select a repo,
   (b) request a preview (read-only), (c) review the generated document, and
   (d) explicitly approve it. Only then does the _backend_ (not the model)
   write a single file to `docs/council/<slug>.md`. You can discard the
-  preview at any point.
+  preview at any point. This is the only *intended* application write flow.
 
-- **Dangerous flags are transport internals, not a security sandbox.**
-  `--dangerously-skip-permissions`, `--sandbox workspace-write`, and similar
-  flags are how the CLIs accept instructions. They do not constitute a
-  security boundary. Always review `git diff` after a session with write
-  enabled.
+- **Dangerous flags grant real authority.** `--dangerously-skip-permissions`
+  (used for Claude, agy, and anthropic_agent transports) gives the agent the
+  same filesystem access as your user account. `--sandbox workspace-write`
+  (used for Codex when ``allow_write=True``) enables a writable sandbox.
+  These are CLI-level flags, not sandbox boundaries. Always review
+  ``git diff`` after any session where an agent had write access.
 
-- **No worker pushes to remotes by default.** Push, force-push, and
-  destructive Git operations are not authorized in any current flow.
+- **No-push is a policy, not a programmatic boundary.** Workers do not push
+  to remotes under normal operation because the prompts and flow never
+  authorize it. There is no network-level or git-hook enforcement. Push,
+  force-push, and destructive Git operations are only guarded by the prompt
+  instructions given to each agent.
 
 - **Repository validation.** Repos are checked against allowed roots
   (`COUNCIL_REPO_ROOTS`) with `realpath`-based anti-traversal before any
