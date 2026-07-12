@@ -16,6 +16,29 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Uses environment variable `OPENROUTER_API_KEY` from `.env`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
+**`paths.py`** — Deterministic data paths (ADR 0002 §2)
+- Computes absolute paths via `pathlib.Path`, rooted at the project directory
+  (the directory containing `backend/`).  No cwd-dependence.
+- Derives `DB_PATH`, `DATA_DIR`, `COUNCIL_CONFIG_PATH`, `AGENT_CWD` from
+  `COUNCIL_HOME` (default: `<project_root>/data`).
+- Individual overrides: `COUNCIL_DB_PATH`, `COUNCIL_DATA_DIR`,
+  `COUNCIL_CONFIG_PATH`, `COUNCIL_AGENT_CWD` — each trumps the
+  `COUNCIL_HOME`-derived default.
+- For tests, set `COUNCIL_HOME=<tmpdir>` to isolate every data file in a
+  temp directory.
+
+**`migrations.py`** — Ordered, transactional schema migrations (ADR 0002 §2)
+- Registry of `(version, name, callable)` tuples decorated with `@register`.
+- `migrate(conn)` applies all pending migrations in version order, each in
+  its own transaction.
+- `current_version(conn)` returns the highest applied version (0 if none).
+- Migrations table: `_migrations(version INTEGER PK, name TEXT, applied_at TEXT)`.
+- Current migrations:
+  1. `bootstrap_schema` — conversations + messages tables (idempotent, `IF NOT EXISTS`)
+  2. `add_repo_path_column` — `ALTER TABLE` guarded by `PRAGMA table_info`
+  3. `add_message_position_unique` — unique index on `(conversation_id, position)`
+- `storage.init_db()` delegates to `migrations.migrate()`; no more ad-hoc DDL.
+
 **`openrouter.py`**
 - `query_model()`: Single async model query
 - `query_models_parallel()`: Parallel queries using `asyncio.gather()`
@@ -35,8 +58,13 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
 
 **`storage.py`**
-- JSON-based conversation storage in `data/conversations/`
-- Each conversation: `{id, created_at, messages[]}`
+- SQLite-based conversation storage in `data/council.db` (path from `paths.py`)
+- Schema is now applied via ``migrations.migrate()``; ``init_db()`` is the
+  single entry point that ensures directory, file, and schema exist.
+- Connection policy: ``busy_timeout=5000``, ``journal_mode=WAL``,
+  ``foreign_keys=ON``.  Each public API function opens/closes its own
+  connection via ``with _connect()``.
+- Conversation format: `{id, created_at, title, repo_path, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
 
@@ -143,7 +171,20 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 
 ## Testing Notes
 
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+Tests live under `tests/` and use **isolated temporary databases**: the
+`temp_db` / `temp_db_raw` fixtures set `COUNCIL_HOME=<tmpdir>` and reload
+backend modules so every test runs against its own files.  No real providers
+or API keys are consumed.
+
+Run:
+```bash
+uv run pytest tests/ -v
+```
+
+Backend import sanity check:
+```bash
+uv run python -c "from backend import storage, migrations, paths; print('OK')"
+```
 
 ## Data Flow Summary
 
