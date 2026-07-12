@@ -105,6 +105,19 @@ _STDERR_DRAIN = 5.0            # seconds to wait for stderr task to finish
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+async def _cancel_and_await(*tasks: asyncio.Task) -> None:
+    """Cancel *tasks* and await them to suppress pending-task warnings.
+
+    All exceptions (including ``CancelledError``) are swallowed — the
+    caller only cares that the tasks are done, not what they produced.
+    """
+    for t in tasks:
+        if not t.done():
+            t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def _reap(proc: asyncio.subprocess.Process) -> Optional[int]:
     """Wait for *proc* to exit (no signal).  Returns the exit code or ``None``."""
     if proc.returncode is not None:
@@ -120,19 +133,24 @@ async def _terminate_and_reap(proc: asyncio.subprocess.Process) -> Optional[int]
 
     Escalates after ``_KILL_GRACE`` seconds if the process hasn't exited.
     Returns the exit code or ``None`` when even SIGKILL didn't work.
-    """
-    if proc.returncode is not None:
-        return proc.returncode
 
+    Always signals the process group, even when the leader has already
+    exited, so that orphaned child processes are not left behind.
+    """
     pid = proc.pid
     if pid is None:
-        return None
+        return proc.returncode
 
-    # ── SIGTERM ──────────────────────────────────────────────────────
+    # ── SIGTERM (always attempt, even if leader has exited) ──────────
     try:
         os.killpg(pid, signal.SIGTERM)
     except (ProcessLookupError, OSError):
-        return proc.returncode  # already gone
+        return proc.returncode  # process group already gone
+
+    if proc.returncode is not None:
+        # Leader already exited.  We've done our best by signalling the
+        # process group — children will receive SIGTERM.
+        return proc.returncode
 
     try:
         return await asyncio.wait_for(proc.wait(), timeout=_KILL_GRACE)
@@ -172,25 +190,20 @@ async def _drain_stderr_safely(task: asyncio.Task) -> str:
 
 
 async def _drain_stderr(stderr: asyncio.StreamReader, max_bytes: int) -> str:
-    """Consume *stderr* until EOF, keeping at most *max_bytes* tail bytes.
+    """Consume *stderr* until EOF, keeping exactly the last *max_bytes* bytes.
 
-    Uses a sliding window of byte chunks so the *last* ``max_bytes`` bytes
-    are retained, not the first.
+    Uses a ``bytearray`` sliding window so the retained tail is always
+    ``min(total_read, max_bytes)`` bytes, regardless of chunk boundaries.
     """
-    chunks: List[bytes] = []
-    total = 0
+    buf = bytearray()
     while True:
         chunk = await stderr.read(4096)
         if not chunk:
             break
-        chunks.append(chunk)
-        total += len(chunk)
-        # Drop earliest chunks until the window fits within max_bytes.
-        while total > max_bytes and chunks:
-            dropped = chunks.pop(0)
-            total -= len(dropped)
-    raw = b"".join(chunks)
-    return raw.decode(errors="replace")
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            buf = buf[-max_bytes:]
+    return buf.decode(errors="replace")
 
 
 # ---------------------------------------------------------------------------
@@ -360,26 +373,27 @@ class WorkerExecutor:
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            # Tear down the tasks we didn't use.
-            for t in pending:
-                t.cancel()
-
             # --- classify what happened ----------------------------------
             if not done:
                 # No task completed → inactivity timeout.
+                await _cancel_and_await(*pending)
                 returncode = await _terminate_and_reap(proc)
                 return WorkerResult(outcome=WorkerOutcome.TIMED_OUT, returncode=returncode)
 
             if cancel_task is not None and cancel_task in done:
                 # Cancellation token fired.
-                returncode = await _terminate_and_reap(proc)
+                await _cancel_and_await(*pending)
                 # Dispose of the readline result (if any) to avoid leaks.
                 if read_task in done:
                     try:
                         read_task.result()
                     except Exception:
                         pass
+                returncode = await _terminate_and_reap(proc)
                 return WorkerResult(outcome=WorkerOutcome.CANCELLED, returncode=returncode)
+
+            # readline completed — cancel the other pending tasks (e.g. cancel_task).
+            await _cancel_and_await(*pending)
 
             # readline completed
             line: bytes = read_task.result()
@@ -402,11 +416,17 @@ class WorkerExecutor:
             if maybe_final is not None:
                 final_text = maybe_final
 
-        # --- natural EOF — wait for process exit then classify ------------
+        # --- natural EOF — wait for leader exit, then clean up orphans ----
         returncode = await _reap(proc)
         if returncode is None:
             # Process didn't exit cleanly within the grace window; escalate.
             returncode = await _terminate_and_reap(proc)
+        else:
+            # Leader exited; signal the process group to kill any orphaned
+            # children that were forked during execution.  _terminate_and_reap
+            # handles the already-exited case by sending killpg and returning
+            # the leader's original returncode.
+            await _terminate_and_reap(proc)
 
         if returncode == 0:
             return WorkerResult(

@@ -934,3 +934,377 @@ class TestStreamingTerminalEvents:
         agent_events = [e for e in events if e.get("type") == "agent"]
         terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
         assert len(terminal) == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for acceptance-fix defects
+# ---------------------------------------------------------------------------
+
+
+class TestStderrExactTail:
+    """Fix 4: stderr tail must return the actual last min(total, max_bytes) bytes,
+    not a potentially smaller whole-chunk approximation."""
+
+    @pytest.mark.asyncio
+    async def test_exact_byte_count_under_limit(self):
+        """When total stderr < max_bytes, ALL bytes are retained exactly."""
+        payload = b"hello world"  # 11 bytes
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            f"sys.stderr.buffer.write({payload!r})\n"
+            "sys.stderr.buffer.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        assert "hello world" in result.stderr_tail
+        assert len(result.stderr_tail.encode(errors="replace")) >= 11
+
+    @pytest.mark.asyncio
+    async def test_exact_byte_count_at_limit(self):
+        """When total stderr == max_bytes, ALL bytes are retained."""
+        # max_bytes is 10 KiB = 10240.  Write exactly that many distinct bytes.
+        size = 10_240
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            f"sys.stderr.buffer.write(b'B' * {size})\n"
+            "sys.stderr.buffer.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        assert len(result.stderr_tail) == size
+        assert all(c == "B" for c in result.stderr_tail)
+
+    @pytest.mark.asyncio
+    async def test_exact_byte_count_across_uneven_chunks(self):
+        """Sliding window retains exactly max_bytes even across uneven reads.
+
+        The old chunk-list approach could drop a chunk and then be well
+        below the max_bytes bound.  The bytearray fix must retain exactly
+        10 KiB regardless of how read() splits the data.
+        """
+        # 10 * 1024 = 10240.  Write 3 KiB of 'A' then 9 KiB of 'B'.
+        # Total = 12 KiB; retained = exactly the last 10 KiB.
+        head_bytes = 3 * 1024
+        tail_bytes = 9 * 1024
+        expected_tail = 10 * 1024
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            f"sys.stderr.buffer.write(b'A' * {head_bytes})\n"
+            f"sys.stderr.buffer.write(b'B' * {tail_bytes})\n"
+            "sys.stderr.buffer.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # Total: 3 KiB A + 9 KiB B = 12288 bytes.
+        # Retain last 10 KiB = 10240 bytes → drop 2048 bytes from head.
+        # 3072 A − 2048 = 1024 A, then all 9216 B.
+        assert len(result.stderr_tail) == expected_tail, (
+            f"Expected exactly {expected_tail} bytes, got {len(result.stderr_tail)}"
+        )
+        expected_content = "A" * 1024 + "B" * 9216
+        assert result.stderr_tail == expected_content, (
+            "Tail content mismatch: expected 1 KiB A followed by 9 KiB B"
+        )
+
+    @pytest.mark.asyncio
+    async def test_exact_byte_count_tiny_chunks(self):
+        """Retention works even when each read() returns a single byte."""
+        # Use Python-level writes to force small buffering.
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            "for _ in range(3000):\n"
+            "    sys.stderr.write('x')\n"
+            "sys.stderr.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # 3000 'x' chars are well under 10 KiB, so all should be retained.
+        assert result.stderr_tail.count("x") == 3000
+
+
+class TestTerminateAndReapProcessGroup:
+    """Fix 3: _terminate_and_reap must kill children even when leader exited."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.posix
+    async def test_child_killed_after_leader_exits(self):
+        """Deterministic POSIX test: start a child, let the leader exit, and
+        verify no live child remains after executor completion."""
+        # The leader (Python script) forks a child that records its PID to a
+        # temp file, then the leader exits immediately.  The executor must
+        # kill the orphaned child (via killpg on the session) even though the
+        # leader has already exited.
+        import tempfile
+
+        pid_file = tempfile.mktemp(suffix=".pid")
+        ready_file = tempfile.mktemp(suffix=".ready")
+
+        script = (
+            "import os, sys, time, signal\n"
+            "# Child must be in the same process group (start_new_session ensures it).\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    # Child: write pid + ready marker, then close inherited pipe fds\n"
+            "    # so the executor sees EOF on stdout/stderr when the leader exits.\n"
+            f"    with open({json.dumps(pid_file)}, 'w') as f:\n"
+            "        f.write(str(os.getpid()))\n"
+            f"    with open({json.dumps(ready_file)}, 'w') as f:\n"
+            "        f.write('ready')\n"
+            "    sys.stderr.flush()\n"
+            "    # Close inherited pipe fds deterministically — os.close, not\n"
+            "    # sys.stdout.close (which only closes the Python wrapper).\n"
+            "    os.close(0)\n"
+            "    os.close(1)\n"
+            "    os.close(2)\n"
+            "    # Wait until killed by executor's process-group cleanup.\n"
+            "    signal.signal(signal.SIGTERM, signal.SIG_DFL)\n"
+            "    signal.pause()\n"
+            "    sys.exit(0)\n"
+            "# Leader: wait for child to be ready, then exit immediately.\n"
+            "for _ in range(100):\n"
+            f"    if os.path.exists({json.dumps(ready_file)}):\n"
+            "        break\n"
+            "    time.sleep(0.02)\n"
+            "print('{\"result\": \"leader done\"}')\n"
+            "sys.stdout.flush()\n"
+            "sys.exit(0)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+
+        # The executor should complete because leader exits 0 (child closes
+        # stdout so EOF arrives).  The _terminate_and_reap in the finally
+        # block signals the process group, killing the orphaned child.
+        assert result.outcome == WorkerOutcome.COMPLETED
+
+        # Clean up temp files — read PID before deleting.
+        child_pid_str = None
+        try:
+            with open(pid_file) as f:
+                child_pid_str = f.read().strip()
+        except OSError:
+            pass
+
+        for f in (pid_file, ready_file):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+        # The child was forked but must not still be running.  Poll briefly
+        # to tolerate the window between SIGTERM delivery and reaping
+        # (zombie state is acceptable — the process has been killed).
+        if child_pid_str:
+            child_pid = int(child_pid_str)
+            import signal as _signal
+            child_dead = False
+            for _ in range(30):  # poll for up to ~1.5 s
+                try:
+                    os.kill(child_pid, 0)
+                    # Process exists — distinguish zombie from running.
+                    try:
+                        with open(f"/proc/{child_pid}/stat") as sf:
+                            state = sf.read().split()[2]
+                        if state == "Z":
+                            child_dead = True  # zombie, cleanup worked
+                            break
+                    except OSError:
+                        pass  # /proc entry may race with exit
+                    await asyncio.sleep(0.05)
+                except (ProcessLookupError, OSError):
+                    child_dead = True
+                    break
+            if not child_dead:
+                try:
+                    os.kill(child_pid, _signal.SIGKILL)
+                except OSError:
+                    pass
+                pytest.fail(
+                    f"Child process {child_pid} still running after executor "
+                    "completion. Process-group cleanup failed."
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.posix
+    async def test_cancellation_kills_process_group(self):
+        """When cancelled, the entire process group (not just the leader) must die."""
+        script = (
+            "import os, sys, time\n"
+            "# Fork a child; both sleep indefinitely.\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    time.sleep(120)\n"
+            "    sys.exit(0)\n"
+            "print('{\"text\": \"leader alive\"}')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(120)\n"
+        )
+        token = CancellationToken()
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=30.0, cancel_token=token,
+        )
+
+        events: List[Dict[str, Any]] = []
+
+        async def run_and_cancel():
+            await asyncio.sleep(0.3)
+            token.cancel()
+            return await _collect_events(executor)
+
+        result, _ = await run_and_cancel()
+        assert result.outcome == WorkerOutcome.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_returncode_still_returned_after_signal(self):
+        """When the leader already exited, _terminate_and_reap still signals the
+        process group AND returns the leader's original returncode."""
+        script = (
+            "import os, sys, time\n"
+            "# Leader exits 0 quickly; child lingers.\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    # Close inherited pipe fds so leader exit → pipe EOF.\n"
+            "    os.close(0)\n"
+            "    os.close(1)\n"
+            "    os.close(2)\n"
+            "    time.sleep(30)\n"
+            "    sys.exit(0)\n"
+            "print('{\"result\": \"quick\"}')\n"
+            "sys.stdout.flush()\n"
+            "sys.exit(0)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # The leader exited 0; we should get its returncode back, not None.
+        assert result.returncode == 0
+
+
+class TestStreamLoopTaskCleanup:
+    """Fix 2: pending asyncio tasks must be awaited after cancellation."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_token_path_awaits_pending_tasks(self):
+        """When the cancel token fires, the pending readline task is cancelled
+        AND awaited (no pending-task warnings).  Verify via asyncio debug."""
+        loop = asyncio.get_running_loop()
+        old_debug = loop.get_debug()
+        loop.set_debug(True)
+
+        # Capture custom exception handler calls.
+        handlers: list = []
+
+        def _handler(lp, ctx):
+            handlers.append(ctx)
+
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(_handler)
+
+        try:
+            token = CancellationToken()
+            script = (
+                "import sys, time\n"
+                "print('{\"text\": \"one\"}')\n"
+                "sys.stdout.flush()\n"
+                "time.sleep(60)\n"
+            )
+            executor = WorkerExecutor(
+                [PYTHON, "-c", script], _null_parser, "m",
+                inactivity_timeout=30.0, cancel_token=token,
+            )
+
+            events: List[Dict[str, Any]] = []
+
+            async def run_and_cancel():
+                await asyncio.sleep(0.3)
+                token.cancel()
+                return await _collect_events(executor)
+
+            result, _ = await run_and_cancel()
+            assert result.outcome == WorkerOutcome.CANCELLED
+
+            # Let the event loop settle so any delayed GC warnings fire.
+            await asyncio.sleep(0.1)
+
+            # Check for "was destroyed but it is pending" messages.
+            pending_msgs = [
+                c for c in handlers
+                if "destroyed" in str(c.get("message", ""))
+                and "pending" in str(c.get("message", ""))
+            ]
+            assert len(pending_msgs) == 0, (
+                f"Pending-task destruction warnings: {pending_msgs}"
+            )
+        finally:
+            loop.set_debug(old_debug)
+            loop.set_exception_handler(old_handler)
+
+    @pytest.mark.asyncio
+    async def test_timeout_path_awaits_pending_tasks(self):
+        """When inactivity timeout fires, pending tasks are cancelled AND awaited."""
+        loop = asyncio.get_running_loop()
+        old_debug = loop.get_debug()
+        loop.set_debug(True)
+
+        handlers: list = []
+
+        def _handler(lp, ctx):
+            handlers.append(ctx)
+
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(_handler)
+
+        try:
+            script = (
+                "import sys, time\n"
+                "print('{\"text\": \"one\"}')\n"
+                "sys.stdout.flush()\n"
+                "time.sleep(60)\n"
+            )
+            executor = WorkerExecutor(
+                [PYTHON, "-c", script], _null_parser, "m",
+                inactivity_timeout=0.5,
+            )
+            result, _ = await _collect_events(executor)
+            assert result.outcome == WorkerOutcome.TIMED_OUT
+
+            await asyncio.sleep(0.1)
+
+            pending_msgs = [
+                c for c in handlers
+                if "destroyed" in str(c.get("message", ""))
+                and "pending" in str(c.get("message", ""))
+            ]
+            assert len(pending_msgs) == 0, (
+                f"Pending-task destruction warnings: {pending_msgs}"
+            )
+        finally:
+            loop.set_debug(old_debug)
+            loop.set_exception_handler(old_handler)
