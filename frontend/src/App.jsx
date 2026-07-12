@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import ConsensusPreview from './components/ConsensusPreview';
 import { api } from './api';
+import { councilReducer, createAssistantMessage } from './reducers/councilReducer';
 import './App.css';
 
 function App() {
@@ -17,26 +18,22 @@ function App() {
     () => localStorage.getItem('councilRepo') || ''
   );
 
-  useEffect(() => { loadConversations(); }, []);
-
-  useEffect(() => {
-    if (currentConversationId) loadConversation(currentConversationId);
-  }, [currentConversationId]);
-
-  const setRepo = (path) => {
-    setCurrentRepo(path);
-    localStorage.setItem('councilRepo', path || '');
-  };
-
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     try {
       setConversations(await api.listConversations());
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
-  };
+  }, []);
 
-  const loadConversation = async (id) => {
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  const setRepo = useCallback((path) => {
+    setCurrentRepo(path);
+    localStorage.setItem('councilRepo', path || '');
+  }, []);
+
+  const loadConversation = useCallback(async (id) => {
     try {
       const conv = await api.getConversation(id);
       setCurrentConversation(conv);
@@ -45,7 +42,11 @@ function App() {
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
-  };
+  }, [setRepo]);
+
+  useEffect(() => {
+    if (currentConversationId) loadConversation(currentConversationId);
+  }, [currentConversationId, loadConversation]);
 
   const handleNewConversation = async () => {
     try {
@@ -75,12 +76,11 @@ function App() {
     }
   };
 
-  // Helper: muta el último mensaje (asistente) del estado
-  const updateLast = (mutator) => {
+  /** Apply a council reducer action to the last (assistant) message. */
+  const dispatchToLast = (action) => {
     setCurrentConversation((prev) => {
       const messages = [...prev.messages];
-      const last = { ...messages[messages.length - 1] };
-      mutator(last);
+      const last = councilReducer({ ...messages[messages.length - 1] }, action);
       messages[messages.length - 1] = last;
       return { ...prev, messages };
     });
@@ -95,7 +95,7 @@ function App() {
         messages: [
           ...prev.messages,
           { role: 'user', content },
-          { role: 'assistant', live: {}, stage: null, stage1: null, stage2: null, stage3: null, metadata: null, research: null },
+          createAssistantMessage(),
         ],
       }));
 
@@ -105,66 +105,52 @@ function App() {
         (event) => {
           switch (event.type) {
             case 'stage':
-              updateLast((m) => { m.stage = event.stage; });
+              dispatchToLast({ type: 'STAGE', stage: event.stage });
               break;
             case 'agent':
-              updateLast((m) => {
-                m.live = { ...m.live, [event.model]: { ...(m.live[event.model] || {}), status: event.status, reason: event.reason } };
-              });
+              dispatchToLast({ type: 'AGENT', model: event.model, status: event.status, reason: event.reason });
               break;
             case 'tool':
-              updateLast((m) => {
-                m.live = { ...m.live, [event.model]: { status: 'working', tool: event.tool, detail: event.detail } };
-              });
+              dispatchToLast({ type: 'TOOL', model: event.model, tool: event.tool, detail: event.detail });
               break;
             case 'thought':
-              updateLast((m) => {
-                m.live = { ...m.live, [event.model]: { status: 'working', thought: event.text } };
-              });
+              dispatchToLast({ type: 'THOUGHT', model: event.model, text: event.text });
               break;
             case 'result':
-              updateLast((m) => {
-                const existing = m.stage1 || [];
-                m.stage1 = [...existing.filter((r) => r.model !== event.model), { model: event.model, response: event.text }];
-              });
+              dispatchToLast({ type: 'RESULT', model: event.model, text: event.text });
               break;
             case 'research':
-              updateLast((m) => {
-                m.research = { model: event.model, brief: event.brief };
-                m.live = {}; // limpiar el progreso del investigador antes de Stage 1
-              });
+              dispatchToLast({ type: 'RESEARCH', model: event.model, brief: event.brief });
               break;
             case 'ranking':
-              updateLast((m) => { m.metadata = { ...(m.metadata || {}), aggregate_rankings: event.aggregate }; });
+              dispatchToLast({ type: 'RANKING', aggregate: event.aggregate });
               break;
             case 'metadata':
-              updateLast((m) => { m.metadata = { ...(m.metadata || {}), ...event.metadata }; });
+              dispatchToLast({ type: 'METADATA', metadata: event.metadata });
               break;
             case 'consensus_file':
-              updateLast((m) => { m.consensusFile = event.path; });
+              dispatchToLast({ type: 'CONSENSUS_FILE', path: event.path });
               break;
             case 'final':
-              updateLast((m) => { m.stage3 = { model: event.model, response: event.text }; });
+              dispatchToLast({ type: 'FINAL', model: event.model, text: event.text });
               break;
             case 'title':
               loadConversations();
               break;
             case 'done':
-              updateLast((m) => {
-                m.stage1 = event.stage1;
-                m.stage2 = event.stage2;
-                m.stage3 = event.stage3;
-                m.metadata = event.metadata;
-                if (event.metadata?.research) m.research = event.metadata.research;
-                m.stage = null;
-                m.live = {};
+              dispatchToLast({
+                type: 'DONE',
+                stage1: event.stage1,
+                stage2: event.stage2,
+                stage3: event.stage3,
+                metadata: event.metadata,
               });
               loadConversations();
               setIsLoading(false);
               break;
             case 'fatal':
               console.error('Stream fatal:', event.message);
-              updateLast((m) => { m.error = event.message; m.stage = null; });
+              dispatchToLast({ type: 'FATAL', message: event.message });
               setIsLoading(false);
               break;
             default:
@@ -188,7 +174,7 @@ function App() {
       setPreviewDoc(preview);
     } catch (error) {
       console.error('Failed to preview consensus:', error);
-      updateLast((m) => { m.error = `No se pudo generar el documento: ${error.message}`; });
+      dispatchToLast({ type: 'ERROR', message: `No se pudo generar el documento: ${error.message}` });
     } finally {
       setIsDocumenting(false);
     }
@@ -200,11 +186,11 @@ function App() {
     setIsApproving(true);
     try {
       const res = await api.approveConsensus(currentConversationId, currentRepo);
-      updateLast((m) => { m.consensusFile = res.consensus_file; });
+      dispatchToLast({ type: 'CONSENSUS_FILE', path: res.consensus_file });
       setPreviewDoc(null);
     } catch (error) {
       console.error('Failed to approve consensus:', error);
-      updateLast((m) => { m.error = `No se pudo escribir: ${error.message}`; });
+      dispatchToLast({ type: 'ERROR', message: `No se pudo escribir: ${error.message}` });
     } finally {
       setIsApproving(false);
     }

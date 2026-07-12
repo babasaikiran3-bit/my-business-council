@@ -33,13 +33,17 @@ export default function RepoSelector({ value, onChange }) {
   const [history, setHistory] = useState(loadHistory);
   const searchRef = useRef(null);
 
+  const handleOpen = () => {
+    setQuery('');
+    setManual('');
+    setOpen(true);
+  };
+
   useEffect(() => {
     if (!open) return;
     api.fetchRepos()
       .then((data) => setRepos(data.repos || []))
       .catch((e) => console.error('fetchRepos', e));
-    setQuery('');
-    setManual('');
     // foco al abrir
     setTimeout(() => searchRef.current?.focus(), 50);
   }, [open]);
@@ -70,7 +74,7 @@ export default function RepoSelector({ value, onChange }) {
 
   return (
     <div className="repo-selector">
-      <button className="repo-trigger" onClick={() => setOpen(true)} title={value || 'Sin repo'}>
+      <button className="repo-trigger" onClick={handleOpen} title={value || 'Sin repo'}>
         <span className="repo-trigger-icon">📁</span>
         {value ? (
           <span className="repo-trigger-name">{currentName}</span>
