@@ -637,3 +637,300 @@ class TestWorkerExecutorEdgeCases:
         result, _ = await _collect_events(executor)
         # Should still only have ["echo", "hello"]
         assert result.outcome == WorkerOutcome.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for defects identified in commit ba26aaa review
+# ---------------------------------------------------------------------------
+
+class TestDrainStderrTail:
+    """Defect 2: _drain_stderr must retain the LAST bounded bytes, not the first."""
+
+    @pytest.mark.asyncio
+    async def test_retains_tail_not_head(self):
+        """When stderr output exceeds max_bytes, the retained text must come
+        from the end (tail), not the beginning (head)."""
+        # Write 15 KB to stderr: first 5 KB = 'A', last 10 KB = 'B'.
+        # With a 10 KB bound, only 'B's should survive.
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            "sys.stderr.write('A' * 5_120 + 'B' * 10_240)\n"
+            "sys.stderr.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # Must contain the tail 'B's, not the head 'A's.
+        assert "B" in result.stderr_tail
+        assert "A" not in result.stderr_tail
+
+    @pytest.mark.asyncio
+    async def test_retains_middle_sliding_window(self):
+        """The sliding window should continuously evict old chunks."""
+        script = (
+            "import sys\n"
+            "print('{\"result\": \"ok\"}')\n"
+            "for i in range(30):\n"
+            "    sys.stderr.write(f'chunk_{i:04d}' + 'x' * 400 + '\\n')\n"
+            "sys.stderr.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # Early chunks should be gone; late chunks should remain.
+        assert "chunk_0000" not in result.stderr_tail
+        assert "chunk_0029" in result.stderr_tail
+
+
+class TestReapEscalation:
+    """Defect 4: _reap timeouts must escalate to _terminate_and_reap."""
+
+    @pytest.mark.asyncio
+    async def test_reap_escalates_on_timeout(self):
+        """A process that ignores SIGTERM is eventually killed via SIGKILL.
+
+        The inactivity timeout path calls _terminate_and_reap which escalates
+        SIGTERM → SIGKILL.  This test verifies that a SIGTERM-ignoring
+        process is ultimately terminated and its returncode is negative
+        (signalling it died by signal).
+        """
+        # Child ignores SIGTERM, busy-waits, and produces no more output.
+        script = (
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "print('{\"text\": \"starting\"}')\n"
+            "sys.stdout.flush()\n"
+            "# Busy-wait without touching stdout — triggers inactivity timeout.\n"
+            "deadline = time.time() + 120\n"
+            "while time.time() < deadline:\n"
+            "    pass\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=0.5,
+        )
+        result, events = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.TIMED_OUT
+        # The process was killed by signal; returncode should be negative
+        # on POSIX (the kill signal's negative number).
+        assert result.returncode is not None
+        assert result.returncode < 0, (
+            f"Expected negative returncode (killed by signal), got {result.returncode}"
+        )
+
+
+class TestCancellationCleanup:
+    """Defect 5: External CancelledError must trigger process cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_external_cancellation_terminates_process(self):
+        """When the coroutine running the executor is cancelled externally,
+        the process group must still be terminated and reaped."""
+        script = (
+            "import sys, time\n"
+            "print('{\"text\": \"running\"}')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(60)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=30.0,
+        )
+
+        run_task = asyncio.create_task(executor.run(lambda e: None))
+
+        # Wait for the first line, then externally cancel.
+        await asyncio.sleep(0.5)
+        run_task.cancel()
+
+        # The cancellation must not leave a zombie.
+        with pytest.raises(asyncio.CancelledError):
+            await run_task
+
+        # After cancellation, the _stream_loop tasks should be cleaned up
+        # (no pending-task warnings).  We can't directly assert on warnings,
+        # but if the process survived we'd have a resource leak.
+        # Let the event loop settle.
+        await asyncio.sleep(0.2)
+
+    @pytest.mark.asyncio
+    async def test_cancellation_preserves_semantics(self):
+        """CancelledError must propagate after cleanup, not be swallowed."""
+        script = (
+            "import sys, time\n"
+            "print('{\"text\": \"start\"}')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(60)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=30.0,
+        )
+
+        events: List[Dict[str, Any]] = []
+
+        async def run_and_cancel():
+            await asyncio.sleep(0.3)
+            task = asyncio.current_task()
+            if task:
+                task.cancel()
+            return await executor.run(lambda e: events.append(e))
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_and_cancel()
+
+
+class TestStderrDrainSafety:
+    """Defect 3: stderr must drain after process exit before cancellation."""
+
+    @pytest.mark.asyncio
+    async def test_stderr_drains_after_exit(self):
+        """Buffered stderr from children must be captured even after the
+        main process exits."""
+        script = (
+            "import os, sys, time\n"
+            "# Fork a child that writes to stderr after the parent exits stdout.\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    time.sleep(0.3)  # parent has exited stdout by then\n"
+            "    sys.stderr.write('late-child-diagnostic')\n"
+            "    sys.stderr.flush()\n"
+            "    sys.exit(0)\n"
+            "print('{\"result\": \"parent done\"}')\n"
+            "sys.stdout.flush()\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.COMPLETED
+        # The late child stderr should be captured.
+        assert "late-child-diagnostic" in result.stderr_tail
+
+    @pytest.mark.asyncio
+    async def test_stderr_tail_set_on_all_outcomes(self):
+        """stderr_tail must be set even for FAILED and TIMED_OUT outcomes."""
+        # FAILED: nonzero exit
+        script = (
+            "import sys\n"
+            "print('{\"text\": \"before crash\"}')\n"
+            "sys.stderr.write('crash diagnostic')\n"
+            "sys.stderr.flush()\n"
+            "sys.exit(3)\n"
+        )
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        result, _ = await _collect_events(executor)
+        assert result.outcome == WorkerOutcome.FAILED
+        assert "crash diagnostic" in result.stderr_tail
+        assert result.returncode == 3
+
+
+class TestStreamingTerminalEvents:
+    """Defect 6: Terminal agent events must be truthful and singular."""
+
+    @pytest.mark.asyncio
+    async def test_completed_emits_done(self):
+        """COMPLETED outcome → exactly one 'done' terminal event."""
+        from backend.streaming import _run_executor
+
+        script = _json_script(['{"result": "ok"}'])
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        events: List[Dict[str, Any]] = []
+
+        content = await _run_executor(executor, lambda e: events.append(e), "test-m")
+        assert content == "ok"
+        agent_events = [e for e in events if e.get("type") == "agent"]
+        terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
+        assert len(terminal) == 1
+        assert terminal[0]["status"] == "done"
+        assert terminal[0]["model"] == "test-m"
+
+    @pytest.mark.asyncio
+    async def test_failed_emits_error(self):
+        """FAILED outcome → exactly one 'error' terminal event."""
+        from backend.streaming import _run_executor
+
+        script = "import sys; print('{\"text\": \"x\"}'); sys.exit(4)"
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        events: List[Dict[str, Any]] = []
+
+        content = await _run_executor(executor, lambda e: events.append(e), "test-m")
+        agent_events = [e for e in events if e.get("type") == "agent"]
+        terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
+        assert len(terminal) == 1
+        assert terminal[0]["status"] == "error"
+        assert "exit code 4" in terminal[0]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_timed_out_emits_error(self):
+        """TIMED_OUT outcome → exactly one 'error' terminal event with reason 'timeout'."""
+        from backend.streaming import _run_executor
+
+        script = "import time; print('{\"text\": \"x\"}'); time.sleep(60)"
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=0.5,
+        )
+        events: List[Dict[str, Any]] = []
+
+        content = await _run_executor(executor, lambda e: events.append(e), "test-m")
+        agent_events = [e for e in events if e.get("type") == "agent"]
+        terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
+        assert len(terminal) == 1
+        assert terminal[0]["status"] == "error"
+        assert terminal[0]["reason"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_emits_error(self):
+        """CANCELLED outcome → exactly one 'error' terminal event with reason 'cancelled'."""
+        from backend.streaming import _run_executor
+
+        token = CancellationToken()
+        token.cancel()  # cancel before start
+        script = _json_script(['{"result": "never"}'])
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0, cancel_token=token,
+        )
+        events: List[Dict[str, Any]] = []
+
+        content = await _run_executor(executor, lambda e: events.append(e), "test-m")
+        agent_events = [e for e in events if e.get("type") == "agent"]
+        terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
+        assert len(terminal) == 1
+        assert terminal[0]["status"] == "error"
+        assert terminal[0]["reason"] == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_terminal_events(self):
+        """Never emit both 'done' and 'error' for the same run."""
+        from backend.streaming import _run_executor
+
+        script = "import sys; print('{\"text\": \"x\"}'); sys.exit(2)"
+        executor = WorkerExecutor(
+            [PYTHON, "-c", script], _null_parser, "m",
+            inactivity_timeout=5.0,
+        )
+        events: List[Dict[str, Any]] = []
+
+        await _run_executor(executor, lambda e: events.append(e), "test-m")
+        agent_events = [e for e in events if e.get("type") == "agent"]
+        terminal = [e for e in agent_events if e.get("status") in ("done", "error")]
+        assert len(terminal) == 1

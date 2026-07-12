@@ -111,13 +111,22 @@ async def _run_executor(
 ) -> Optional[str]:
     """Ejecuta un WorkerExecutor y traduce su WorkerResult al contrato previo.
 
-    Emite el evento 'error' cuando el executor reporta un mensaje de error
-    (p.ej. falló el lanzamiento del binario), preservando la semántica que
-    el frontend espera.
+    Emite exactamente un evento terminal de agente (``done`` o ``error``)
+    según el ``WorkerOutcome``, preservando los shapes de evento que el
+    frontend ya consume.
     """
     result = await executor.run(emit)
-    if result.outcome == WorkerOutcome.FAILED and result.error_message:
-        _emit_error(emit, model_id, result.error_message)
+
+    if result.outcome == WorkerOutcome.COMPLETED:
+        emit({"type": "agent", "model": model_id, "status": "done"})
+    elif result.outcome == WorkerOutcome.FAILED:
+        reason = result.error_message or f"exit code {result.returncode}"
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": reason})
+    elif result.outcome == WorkerOutcome.TIMED_OUT:
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": "timeout"})
+    elif result.outcome == WorkerOutcome.CANCELLED:
+        emit({"type": "agent", "model": model_id, "status": "error", "reason": "cancelled"})
+
     return result.final_text
 
 
@@ -132,6 +141,11 @@ async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
     if spec is None:
         _emit_error(emit, model_id, "modelo desconocido")
         return None
+
+    # Default to the neutral agent directory so the subprocess doesn't
+    # inherit the backend cwd (restores pre-WorkerExecutor behaviour).
+    if cwd is None:
+        cwd = AGENT_CWD
 
     emit({"type": "agent", "model": model_id, "status": "working"})
     transport = spec["transport"]
@@ -161,7 +175,6 @@ async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
                     os.remove(path)
                 except OSError:
                     pass
-            emit({"type": "agent", "model": model_id, "status": "done"})
             return content
 
         # --- Claude y anthropic_agent (DeepSeek/GLM/...): stream-json ---
@@ -178,7 +191,6 @@ async def run_agent_stream(model_id: str, prompt: str, emit: Emit,
             parse_claude_event, model_id,
             env=env, cwd=cwd, inactivity_timeout=CLI_TIMEOUT)
         content = await _run_executor(executor, emit, model_id)
-        emit({"type": "agent", "model": model_id, "status": "done"})
         return content
 
     except Exception as e:

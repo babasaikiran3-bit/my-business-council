@@ -49,7 +49,14 @@ class WorkerResult:
     stderr_tail: str = ""
     """Last ~10 KiB of stderr, decoded with replacement characters."""
     returncode: Optional[int] = None
-    """Exit code (None when the process was killed by signal or never started)."""
+    """Exit code from ``proc.wait()``.
+
+    * Positive integer — normal exit with that code.
+    * Negative integer — killed by signal ``abs(returncode)``
+      (POSIX convention, e.g. -9 for SIGKILL).
+    * ``None`` — the process never started (launch failure) or could
+      not be reaped even after SIGKILL escalation.
+    """
     error_message: Optional[str] = None
     """Provider / executor error when outcome is FAILED."""
 
@@ -144,20 +151,45 @@ async def _terminate_and_reap(proc: asyncio.subprocess.Process) -> Optional[int]
         return None
 
 
+async def _drain_stderr_safely(task: asyncio.Task) -> str:
+    """Wait for the stderr drain *task* to finish with a bounded grace period.
+
+    After the process exits, stderr may still have buffered data from
+    process-group children.  Give the task a chance to finish normally
+    before resorting to cancellation.
+    """
+    if task.done():
+        try:
+            return task.result()
+        except asyncio.CancelledError:
+            return "(stderr task was cancelled)"
+        except Exception:
+            return "(stderr task raised)"
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=_STDERR_DRAIN)
+    except asyncio.TimeoutError:
+        return "(stderr drain timed out)"
+
+
 async def _drain_stderr(stderr: asyncio.StreamReader, max_bytes: int) -> str:
-    """Consume *stderr* until EOF, keeping at most *max_bytes* tail bytes."""
+    """Consume *stderr* until EOF, keeping at most *max_bytes* tail bytes.
+
+    Uses a sliding window of byte chunks so the *last* ``max_bytes`` bytes
+    are retained, not the first.
+    """
     chunks: List[bytes] = []
     total = 0
     while True:
         chunk = await stderr.read(4096)
         if not chunk:
             break
-        if total < max_bytes:
-            chunks.append(chunk)
-            total += len(chunk)
+        chunks.append(chunk)
+        total += len(chunk)
+        # Drop earliest chunks until the window fits within max_bytes.
+        while total > max_bytes and chunks:
+            dropped = chunks.pop(0)
+            total -= len(dropped)
     raw = b"".join(chunks)
-    if len(raw) > max_bytes:
-        raw = raw[-max_bytes:]  # keep the tail
     return raw.decode(errors="replace")
 
 
@@ -254,6 +286,12 @@ class WorkerExecutor:
         result: Optional[WorkerResult] = None
         try:
             result = await self._stream_loop(proc, emit)
+        except asyncio.CancelledError:
+            # External cancellation — clean up, then re-raise to preserve
+            # correct cancellation semantics for the caller.
+            await _terminate_and_reap(proc)
+            result = WorkerResult(outcome=WorkerOutcome.CANCELLED)
+            raise
         except Exception as exc:
             # Something unexpected blew up inside the streaming machinery
             # itself (not a subprocess failure).  Kill and classify.
@@ -263,18 +301,18 @@ class WorkerExecutor:
                 error_message=str(exc),
             )
         finally:
-            # Ensure the stderr consumer is done.
-            if not stderr_task.done():
-                stderr_task.cancel()
-            tail = ""
-            try:
-                tail = await asyncio.wait_for(
-                    stderr_task, timeout=_STDERR_DRAIN
-                )
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                tail = "(stderr drain timed out)"
+            # ── drain stderr with a bounded wait ──────────────────────
+            tail = await _drain_stderr_safely(stderr_task)
             if result is not None:
                 result.stderr_tail = tail
+            # Ensure the stderr task is fully cleaned up (no pending-task
+            # warnings when the run was cancelled).
+            if not stderr_task.done():
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
 
         # --- post-exit: read final_file if applicable --------------------
         if self._final_file and result.outcome == WorkerOutcome.COMPLETED:
@@ -303,8 +341,8 @@ class WorkerExecutor:
         while True:
             # --- cancellation check (inline, no task overhead) --------------
             if self._cancel_token and self._cancel_token.cancelled:
-                await _terminate_and_reap(proc)
-                return WorkerResult(outcome=WorkerOutcome.CANCELLED)
+                returncode = await _terminate_and_reap(proc)
+                return WorkerResult(outcome=WorkerOutcome.CANCELLED, returncode=returncode)
 
             # --- read one line with inactivity timeout --------------------
             read_task = asyncio.create_task(proc.stdout.readline())
@@ -329,19 +367,19 @@ class WorkerExecutor:
             # --- classify what happened ----------------------------------
             if not done:
                 # No task completed → inactivity timeout.
-                await _terminate_and_reap(proc)
-                return WorkerResult(outcome=WorkerOutcome.TIMED_OUT)
+                returncode = await _terminate_and_reap(proc)
+                return WorkerResult(outcome=WorkerOutcome.TIMED_OUT, returncode=returncode)
 
             if cancel_task is not None and cancel_task in done:
                 # Cancellation token fired.
-                await _terminate_and_reap(proc)
+                returncode = await _terminate_and_reap(proc)
                 # Dispose of the readline result (if any) to avoid leaks.
                 if read_task in done:
                     try:
                         read_task.result()
                     except Exception:
                         pass
-                return WorkerResult(outcome=WorkerOutcome.CANCELLED)
+                return WorkerResult(outcome=WorkerOutcome.CANCELLED, returncode=returncode)
 
             # readline completed
             line: bytes = read_task.result()
@@ -366,6 +404,9 @@ class WorkerExecutor:
 
         # --- natural EOF — wait for process exit then classify ------------
         returncode = await _reap(proc)
+        if returncode is None:
+            # Process didn't exit cleanly within the grace window; escalate.
+            returncode = await _terminate_and_reap(proc)
 
         if returncode == 0:
             return WorkerResult(
