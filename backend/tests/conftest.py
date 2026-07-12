@@ -1,6 +1,4 @@
-"""Pytest configuration for async tests."""
-
-import pytest
+"""Backend-specific pytest marker registration."""
 
 
 def pytest_configure(config):
