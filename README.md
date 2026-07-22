@@ -14,74 +14,18 @@ In a bit more detail, here is what happens when you submit a query:
 
 This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
 
-## Setup
+## This fork: Claude Code native, no API key
 
-### 1. Install Dependencies
+This fork replaces the OpenRouter-based FastAPI/React app above with a Claude Code-native setup — two subagents pinned to Opus and Sonnet (`.claude/agents/`) orchestrated by a skill (`.claude/skills/council/`). It runs entirely on a Claude Pro/Max subscription via Claude Code's Agent tool — no OpenRouter account, no separate API key, no per-token billing.
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
+### Usage
 
-**Backend:**
-```bash
-uv sync
+Inside Claude Code, in this directory:
+
+```
+/council <your question>
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-cd ..
-```
+That runs all three stages (first opinions, anonymized peer review, chairman synthesis) and prints them to the conversation.
 
-### 2. Configure API Key
-
-Create a `.env` file in the project root:
-
-```bash
-OPENROUTER_API_KEY=sk-or-v1-...
-```
-
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
-
-### 3. Configure Models (Optional)
-
-Edit `backend/config.py` to customize the council:
-
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-```
-
-## Running the Application
-
-**Option 1: Use the start script**
-```bash
-./start.sh
-```
-
-**Option 2: Run manually**
-
-Terminal 1 (Backend):
-```bash
-uv run python -m backend.main
-```
-
-Terminal 2 (Frontend):
-```bash
-cd frontend
-npm run dev
-```
-
-Then open http://localhost:5173 in your browser.
-
-## Tech Stack
-
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+See `CLAUDE.md` for the full architecture, what was removed from upstream, and notes on reconciling future upstream changes.

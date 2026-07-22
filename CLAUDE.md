@@ -1,166 +1,63 @@
-# CLAUDE.md - Technical Notes for LLM Council
+# CLAUDE.md - LLM Council (Claude Code native fork)
 
-This file contains technical details, architectural decisions, and important implementation notes for future development sessions.
+## What this is
 
-## Project Overview
+This repo started as a clone of [karpathy/llm-council](https://github.com/karpathy/llm-council.git) — a 3-stage LLM deliberation app (first opinions → anonymized peer review → chairman synthesis) originally built as a FastAPI backend + React frontend that called multiple providers through OpenRouter.
 
-LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
+That app has been **removed** and replaced with a Claude-Code-native equivalent: `.claude/agents/` + `.claude/skills/council/`. Run it with `/council <question>` inside Claude Code.
 
-## Architecture
+**Why:** the user has a Claude Pro/Max subscription but no separate Anthropic API key or OpenRouter account, and didn't want to pay for API access just to run this. Claude Code's Agent tool can pin a subagent to a specific model (`model: opus` / `model: sonnet` in a subagent's frontmatter) and run it headlessly, authenticated via the existing subscription login — no API key, no OpenRouter, no per-token billing. That's the entire mechanism this fork relies on.
 
-### Backend Structure (`backend/`)
-
-**`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
-- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
-- Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
-
-**`openrouter.py`**
-- `query_model()`: Single async model query
-- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
-- Returns dict with 'content' and optional 'reasoning_details'
-- Graceful degradation: returns None on failure, continues with successful responses
-
-**`council.py`** - The Core Logic
-- `stage1_collect_responses()`: Parallel queries to all council models
-- `stage2_collect_rankings()`:
-  - Anonymizes responses as "Response A, B, C, etc."
-  - Creates `label_to_model` mapping for de-anonymization
-  - Prompts models to evaluate and rank (with strict format requirements)
-  - Returns tuple: (rankings_list, label_to_model_dict)
-  - Each ranking includes both raw text and `parsed_ranking` list
-- `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
-- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
-- `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
-
-**`storage.py`**
-- JSON-based conversation storage in `data/conversations/`
-- Each conversation: `{id, created_at, messages[]}`
-- Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
-
-**`main.py`**
-- FastAPI app with CORS enabled for localhost:5173 and localhost:3000
-- POST `/api/conversations/{id}/message` returns metadata in addition to stages
-- Metadata includes: label_to_model mapping and aggregate_rankings
-
-### Frontend Structure (`frontend/src/`)
-
-**`App.jsx`**
-- Main orchestration: manages conversations list and current conversation
-- Handles message sending and metadata storage
-- Important: metadata is stored in the UI state for display but not persisted to backend JSON
-
-**`components/ChatInterface.jsx`**
-- Multiline textarea (3 rows, resizable)
-- Enter to send, Shift+Enter for new line
-- User messages wrapped in markdown-content class for padding
-
-**`components/Stage1.jsx`**
-- Tab view of individual model responses
-- ReactMarkdown rendering with markdown-content wrapper
-
-**`components/Stage2.jsx`**
-- **Critical Feature**: Tab view showing RAW evaluation text from each model
-- De-anonymization happens CLIENT-SIDE for display (models receive anonymous labels)
-- Shows "Extracted Ranking" below each evaluation so users can validate parsing
-- Aggregate rankings shown with average position and vote count
-- Explanatory text clarifies that boldface model names are for readability only
-
-**`components/Stage3.jsx`**
-- Final synthesized answer from chairman
-- Green-tinted background (#f0fff0) to highlight conclusion
-
-**Styling (`*.css`)**
-- Light mode theme (not dark mode)
-- Primary color: #4a90e2 (blue)
-- Global markdown styling in `index.css` with `.markdown-content` class
-- 12px padding on all markdown content to prevent cluttered appearance
-
-## Key Design Decisions
-
-### Stage 2 Prompt Format
-The Stage 2 prompt is very specific to ensure parseable output:
-```
-1. Evaluate each response individually first
-2. Provide "FINAL RANKING:" header
-3. Numbered list format: "1. Response C", "2. Response A", etc.
-4. No additional text after ranking section
-```
-
-This strict format allows reliable parsing while still getting thoughtful evaluations.
-
-### De-anonymization Strategy
-- Models receive: "Response A", "Response B", etc.
-- Backend creates mapping: `{"Response A": "openai/gpt-5.1", ...}`
-- Frontend displays model names in **bold** for readability
-- Users see explanation that original evaluation used anonymous labels
-- This prevents bias while maintaining transparency
-
-### Error Handling Philosophy
-- Continue with successful responses if some models fail (graceful degradation)
-- Never fail the entire request due to single model failure
-- Log errors but don't expose to user unless all models fail
-
-### UI/UX Transparency
-- All raw outputs are inspectable via tabs
-- Parsed rankings shown below raw text for validation
-- Users can verify system's interpretation of model outputs
-- This builds trust and allows debugging of edge cases
-
-## Important Implementation Details
-
-### Relative Imports
-All backend modules use relative imports (e.g., `from .config import ...`) not absolute imports. This is critical for Python's module system to work correctly when running as `python -m backend.main`.
-
-### Port Configuration
-- Backend: 8001 (changed from 8000 to avoid conflict)
-- Frontend: 5173 (Vite default)
-- Update both `backend/main.py` and `frontend/src/api.js` if changing
-
-### Markdown Rendering
-All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
-
-### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
-
-## Common Gotchas
-
-1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
-2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
-3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
-4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
-
-## Future Enhancement Ideas
-
-- Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
-- Export conversations to markdown/PDF
-- Model performance analytics over time
-- Custom ranking criteria (not just accuracy/insight)
-- Support for reasoning models (o1, etc.) with special handling
-
-## Testing Notes
-
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
-
-## Data Flow Summary
+## Current architecture
 
 ```
-User Query
-    ↓
-Stage 1: Parallel queries → [individual responses]
-    ↓
-Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankings]
-    ↓
-Aggregate Rankings Calculation → [sorted by avg position]
-    ↓
-Stage 3: Chairman synthesis with full context
-    ↓
-Return: {stage1, stage2, stage3, metadata}
-    ↓
-Frontend: Display with tabs + validation UI
+.claude/
+  agents/
+    council-opus.md              # Stage 1/2 member, model: opus
+    council-sonnet.md            # Stage 1/2 member, model: sonnet
+    council-devils-advocate.md   # Stage 3, Black Hat (risk case), model: sonnet, advisory only
+    council-optimist.md          # Stage 3, Yellow Hat (upside case), model: sonnet, advisory only
+    council-feasibility.md       # Stage 3, practicality rating, model: sonnet, advisory only
+    council-researcher.md        # on-demand only, model: opus, dispatched on NEEDS RESEARCH: flags
+    council-chairman.md          # Stage 4, neutral synthesis only, model: opus, never gives a first opinion
+  skills/
+    council/
+      SKILL.md                   # orchestrates /council: 4 stages + research escape hatch
 ```
 
-The entire flow is async/parallel where possible to minimize latency.
+This is loosely modeled on Edward de Bono's *Six Thinking Hats* — separate members embody separate modes of judgment (facts, risk, upside, practicality) instead of one model trying to hold all of them at once, which is what produces yes-bias in the first place.
+
+- **Stage 1 (first opinions):** `council-opus` and `council-sonnet` each answer the question independently, dispatched in parallel, no knowledge of each other.
+- **Stage 2 (peer review):** responses are anonymized as Response A/B (letter assignment randomized per run) and each agent ranks/critiques the *other's* answer without knowing which model wrote it.
+- **Stage 3 (multi-hat critique):** `council-devils-advocate`, `council-optimist`, and `council-feasibility` each independently react to the question and both Stage 1 answers — risk case, upside case, and a Low/Medium/High practicality rating respectively. All three are **advisory only**: they rate and flag, they never block or veto.
+- **Research escape hatch:** any stage can end a response with `NEEDS RESEARCH: <question>` when it needs current/external info it doesn't have. The skill collects these and dispatches `council-researcher` before the chairman synthesizes — this agent is never run speculatively, only on demand.
+- **Stage 4 (chairman):** `council-chairman` — a dedicated, opinion-free agent — synthesizes the final answer from everything above, with inputs assembled in randomized order specifically so it can't anchor on read-order or favor its own earlier take (it doesn't have one; splitting the chairman out from `council-opus` was a deliberate fix for that bias).
+- Output goes straight to the terminal/chat (headings per stage). No artifact by default — only rendered as an HTML artifact if explicitly requested after the fact (see SKILL.md).
+
+To add a further hat (e.g. a "user advocate" or a Green Hat creative-alternatives member, or a third first-opinion model like a local model once that's wired up), add a new `.claude/agents/council-<name>.md` following the existing pattern and wire it into the relevant stage in `SKILL.md` — see the Notes section there.
+
+## Removed from upstream
+
+Deleted entirely (recoverable via `git log` — they were committed once, then removed in the commit that added the agent/skill setup):
+
+- `backend/` — FastAPI app: `config.py` (model list + chairman), `council.py` (the 3-stage prompt logic), `openrouter.py` (HTTP client), `storage.py`, `main.py`
+- `frontend/` — React/Vite app with the Stage1/2/3 tabbed UI
+- `main.py`, `start.sh`, `pyproject.toml`, `uv.lock`, `.python-version` — Python project plumbing for the above
+
+## Reconciling future upstream pulls
+
+This repo now lives at [MKamel1/llm-council](https://github.com/MKamel1/llm-council) (GitHub fork) as `origin` — `git push`/`git pull` with no args target it directly. `karpathy/llm-council` is wired up as `upstream` for pulling in future changes only (`git fetch upstream`), not for pushing. If upstream changes land and get pulled/merged in (e.g. via `git fetch upstream` + cherry-pick, since this fork's history has diverged structurally):
+
+- **Prompt/logic changes to `backend/council.py`** (Stage 2 ranking format, aggregate-ranking math, chairman prompt) are the most likely thing worth porting — translate the *prompt wording and stage logic*, not the code, into `SKILL.md`'s stage instructions and the relevant agent files' system prompts.
+- **New models added to `backend/config.py`'s `COUNCIL_MODELS`** — decide if it's worth adding as a new subagent here (only meaningful for models Claude Code can actually run: Anthropic models via `model:` frontmatter, or self-hosted/local models once that path exists — see below).
+- **Frontend UI changes** are not applicable — there's no web UI in this fork. If the user later wants the visual tabbed view back, that's the "render as artifact" path already noted in `SKILL.md`, not a frontend rebuild.
+- If upstream restructures `backend/openrouter.py` (e.g. new provider support), that's irrelevant here since this fork doesn't use OpenRouter at all.
+
+## Future: local models / other providers
+
+The user's stated plan is to add local models (e.g. via Ollama) or other API providers later. Tracked as [issue #2](https://github.com/MKamel1/llm-council/issues/2) — don't build until asked, that issue is the placeholder for when this conversation happens. Two integration paths noted there:
+
+1. **Still Claude-Code-native:** if Claude Code ever supports pinning a subagent to a non-Anthropic/local model, extend the same `.claude/agents/council-<name>.md` pattern.
+2. **Back to a real backend:** if local/other-provider models need to be called directly (most likely path — Claude Code subagents can only run Claude models), a lightweight script or small server would be needed alongside the skill, called out to for those specific council members while Opus/Sonnet stay on the subagent path. This would be a hybrid, not a full revival of the original OpenRouter backend.
+
+**Also revisit then:** failure handling currently aborts the whole `/council` run on any agent failure (see `SKILL.md` → Failure Handling), on the reasoning that every agent shares one subscription today, so a failure is likely systemic. Once local models are in the mix, a single model's failure becomes a more plausible isolated event, and graceful degradation (continue with a noted gap, matching upstream's original philosophy) may be worth reconsidering.

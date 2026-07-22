@@ -1,0 +1,3 @@
+# Cross-review instead of a single strongest-model judge
+
+Stage 2 peer review uses fixed cross-review — `council-opus` reviews only `council-sonnet`'s answer and vice versa — rather than having Opus (the stronger model) review both answers. We considered the single-judge approach for consistency, but rejected it: a model reviewing its own (even sanitized/anonymized) answer risks self-preference bias, a documented tendency for models to rate their own writing more favorably even when blinded to authorship, since stylistic self-recognition can survive anonymization. Fixed cross-review sidesteps this by construction — neither model ever reviews its own output — at the cost of Sonnet doing half the reviewing instead of Opus doing all of it.
