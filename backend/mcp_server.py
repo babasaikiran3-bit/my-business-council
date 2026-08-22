@@ -24,6 +24,37 @@ from .council import (
     stage3_synthesize_final,
 )
 
+def _build_auth():
+    """OAuth is required for hosted use - claude.ai custom connectors register
+    via DCR and refuse to connect to a server without it. Local stdio needs
+    none of this, so it is only wired up for the HTTP transport.
+    """
+    if os.getenv("MCP_TRANSPORT") != "streamable-http":
+        return None, None
+
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+
+    from .oauth import PassphraseAuthProvider
+
+    public_url = os.getenv("PUBLIC_URL", "").rstrip("/")
+    if not public_url:
+        raise RuntimeError(
+            "PUBLIC_URL is not set. OAuth redirects and issuer metadata need the "
+            "server's own public https URL, e.g. https://<app>.up.railway.app"
+        )
+
+    provider = PassphraseAuthProvider(os.getenv("COUNCIL_PASSPHRASE", ""), public_url)
+    settings = AuthSettings(
+        issuer_url=public_url,
+        resource_server_url=public_url,
+        client_registration_options=ClientRegistrationOptions(enabled=True),
+        required_scopes=[],
+    )
+    return provider, settings
+
+
+_AUTH_PROVIDER, _AUTH_SETTINGS = _build_auth()
+
 mcp = MCPServer(
     name="llm-council",
     version="1.0.0",
@@ -33,7 +64,14 @@ mcp = MCPServer(
         "peer rankings. Use when a question is genuinely contested and one "
         "model's answer is not enough."
     ),
+    auth=_AUTH_SETTINGS,
+    auth_server_provider=_AUTH_PROVIDER,
 )
+
+if _AUTH_PROVIDER is not None:
+    from .oauth import register_routes
+
+    register_routes(mcp, _AUTH_PROVIDER)
 
 
 # Chained-call state. Stage 1 returns a council_id; later stages look the data up
