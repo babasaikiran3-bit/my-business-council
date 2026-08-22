@@ -34,13 +34,18 @@ cd ..
 
 ### 2. Configure API Key
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` in the project root and fill in a key for each
+provider you use:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=AIza...
+XAI_API_KEY=xai-...
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+Only the providers listed in `COUNCIL_MODELS` need a key. Each provider is
+billed separately by its own vendor.
 
 ### 3. Configure Models (Optional)
 
@@ -50,12 +55,16 @@ Edit `backend/config.py` to customize the council:
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-opus-5",
     "x-ai/grok-4",
 ]
 
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 ```
+
+Identifiers are `<provider>/<model>`. The provider must be a key in
+`PROVIDERS` in the same file; the model name is passed to that vendor's API
+verbatim.
 
 ## Running the Application
 
@@ -81,7 +90,7 @@ Then open http://localhost:5173 in your browser.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
+- **Backend:** FastAPI (Python 3.10+), async httpx, native provider APIs (OpenAI, Anthropic, Google, xAI)
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript

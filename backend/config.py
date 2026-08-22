@@ -5,22 +5,42 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# OpenRouter API key
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Provider registry: endpoint + the env var holding that provider's key.
+# Every provider except Anthropic exposes an OpenAI-compatible
+# /chat/completions endpoint, so they share one request/response shape.
+PROVIDERS = {
+    "openai": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "key_env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "key_env": "ANTHROPIC_API_KEY",
+    },
+    "google": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "key_env": "GEMINI_API_KEY",
+    },
+    "x-ai": {
+        "url": "https://api.x.ai/v1/chat/completions",
+        "key_env": "XAI_API_KEY",
+    },
+}
 
-# Council members - list of OpenRouter model identifiers
+# Council members - "<provider>/<model>". Provider must be a key in PROVIDERS.
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
+    "google/gemini-3.1-pro-preview",
+    "anthropic/claude-opus-5",
     "x-ai/grok-4",
 ]
 
 # Chairman model - synthesizes final response
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+CHAIRMAN_MODEL = "google/gemini-3.1-pro-preview"
 
-# OpenRouter API endpoint
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Anthropic requires max_tokens on every request; the others default it.
+ANTHROPIC_MAX_TOKENS = 16000
+ANTHROPIC_VERSION = "2023-06-01"
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"

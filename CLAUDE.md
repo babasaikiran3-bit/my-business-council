@@ -11,16 +11,24 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `PROVIDERS` (endpoint + key env var per provider)
+- Contains `COUNCIL_MODELS` (list of `<provider>/<model>` identifiers)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Reads one key per provider from `.env`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`, `XAI_API_KEY`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
-**`openrouter.py`**
+**`providers.py`** (formerly `openrouter.py`)
+- `split_model_id()`: Validates and splits `<provider>/<model>`
+- `build_request()`: Returns (url, headers, payload) for one provider
+- `parse_response()`: Normalises provider responses to a common dict
 - `query_model()`: Single async model query
 - `query_models_parallel()`: Parallel queries using `asyncio.gather()`
 - Returns dict with 'content' and optional 'reasoning_details'
 - Graceful degradation: returns None on failure, continues with successful responses
+- **Anthropic is the odd one out**: `/v1/messages`, `x-api-key` auth, required
+  `max_tokens`, and a content-block response. The other three share the OpenAI
+  `/chat/completions` shape with Bearer auth.
 
 **`council.py`** - The Core Logic
 - `stage1_collect_responses()`: Parallel queries to all council models
