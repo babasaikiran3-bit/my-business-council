@@ -9,6 +9,8 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  developerMode,
+  onToggleDeveloperMode,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -73,26 +75,26 @@ export default function ChatInterface({
                   <div className="message-label">LLM Council</div>
 
                   {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
+                  {developerMode && msg.loading?.stage1 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
                       <span>Running Stage 1: Collecting individual responses...</span>
                     </div>
                   )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
+                  {developerMode && msg.stage1 && <Stage1 responses={msg.stage1} />}
 
                   {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
+                  {developerMode && msg.loading?.stage2 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
+                      <span>Running Stage 2: Structured peer critiques...</span>
                     </div>
                   )}
-                  {msg.stage2 && (
+                  {developerMode && msg.stage2 && (
                     <Stage2
-                      rankings={msg.stage2}
+                      critiques={msg.stage2}
                       labelToModel={msg.metadata?.label_to_model}
-                      aggregateRankings={msg.metadata?.aggregate_rankings}
+                      structuredSummary={msg.metadata?.structured_summary}
                     />
                   )}
 
@@ -120,7 +122,18 @@ export default function ChatInterface({
         <div ref={messagesEndRef} />
       </div>
 
-      {conversation.messages.length === 0 && (
+      <>
+        <div className="developer-mode-toggle">
+          <label>
+            <input
+              type="checkbox"
+              checked={developerMode}
+              onChange={(e) => onToggleDeveloperMode(e.target.checked)}
+              disabled={isLoading}
+            />
+            Developer Mode (show internal deliberation)
+          </label>
+        </div>
         <form className="input-form" onSubmit={handleSubmit}>
           <textarea
             className="message-input"
@@ -139,7 +152,7 @@ export default function ChatInterface({
             Send
           </button>
         </form>
-      )}
+      </>
     </div>
   );
 }

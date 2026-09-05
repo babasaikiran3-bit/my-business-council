@@ -1,270 +1,430 @@
-"""3-stage LLM Council orchestration."""
+"""3-stage collaborative LLM orchestration with optional internal deliberation."""
 
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from .config import (
+    CHAIRMAN_MODEL,
+    COUNCIL_LITE_MODE,
+    COUNCIL_MODELS,
+    JUDGE_MODELS,
+    RAG_CHUNK_OVERLAP,
+    RAG_CHUNK_SIZE,
+    RAG_DOCUMENTS_DIR,
+    RAG_ENABLED,
+    RAG_TOP_K,
+    TITLE_MODEL,
+)
+from .providers.factory import get_provider
+from .rag import retrieve_context
+
+
+provider = get_provider()
+
+TRIVIAL_PROMPT_PATTERN = re.compile(
+    r"^(hi|hello|hey|yo|hola|sup|thanks|thank you|ok|okay|good morning|good afternoon|good evening)[!.?\s]*$",
+    re.IGNORECASE,
+)
+
+CRITIQUE_FIELDS = [
+    "strengths",
+    "weaknesses",
+    "missing_information",
+    "unsupported_claims",
+    "suggested_improvements",
+]
+
+
+def _response_label(index: int) -> str:
+    """Generate stable anonymous labels for candidate responses."""
+    return f"Response {chr(65 + index)}"
+
+
+def is_trivial_prompt(user_query: str) -> bool:
+    """Return True for short greeting-like prompts that should skip deliberation."""
+    normalized = re.sub(r"\s+", " ", user_query.strip())
+    if not normalized:
+        return True
+    if TRIVIAL_PROMPT_PATTERN.match(normalized):
+        return True
+    if len(normalized.split()) <= 2 and normalized.lower() in {
+        "hello there",
+        "hi there",
+        "howdy",
+    }:
+        return True
+    return False
+
+
+def _extract_json_payload(text: str) -> Optional[Dict[str, Any]]:
+    """Extract a JSON object from model output."""
+    candidates = [text.strip()]
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    candidates.extend(fenced)
+
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidates.append(text[first_brace:last_brace + 1])
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _normalize_string_list(value: Any) -> List[str]:
+    """Normalize any JSON-like list field into a string list."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def parse_structured_critiques(
+    critique_text: str,
+    valid_labels: List[str],
+) -> List[Dict[str, Any]]:
+    """Parse structured critique JSON from evaluator output."""
+    payload = _extract_json_payload(critique_text)
+    if payload is None:
+        return []
+
+    critiques = payload.get("critiques", [])
+    if not isinstance(critiques, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for item in critiques:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("response_label", "")).strip()
+        if label not in valid_labels:
+            continue
+
+        entry = {"response_label": label}
+        for field in CRITIQUE_FIELDS:
+            entry[field] = _normalize_string_list(item.get(field))
+        normalized.append(entry)
+
+    return normalized
+
+
+def _aggregate_structured_critiques(
+    stage2_results: List[Dict[str, Any]],
+    valid_labels: List[str],
+) -> List[Dict[str, Any]]:
+    """Aggregate all evaluator critiques into response-scoped structured summaries."""
+    aggregate: Dict[str, Dict[str, List[str]]] = {
+        label: {field: [] for field in CRITIQUE_FIELDS}
+        for label in valid_labels
+    }
+
+    for evaluator in stage2_results:
+        for critique in evaluator.get("structured_critiques", []):
+            label = critique.get("response_label")
+            if label not in aggregate:
+                continue
+            for field in CRITIQUE_FIELDS:
+                for item in critique.get(field, []):
+                    if item and item not in aggregate[label][field]:
+                        aggregate[label][field].append(item)
+
+    return [
+        {
+            "response_label": label,
+            **aggregate[label],
+        }
+        for label in valid_labels
+    ]
+
+
+def _select_best_existing_response(stage1_results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Pick the strongest available direct response fallback."""
+    if not stage1_results:
+        return None
+
+    chairman_candidate = next(
+        (
+            result
+            for result in stage1_results
+            if result.get("model") == CHAIRMAN_MODEL and result.get("response", "").strip()
+        ),
+        None,
+    )
+    if chairman_candidate is not None:
+        return chairman_candidate
+
+    non_empty = [
+        result for result in stage1_results if result.get("response", "").strip()
+    ]
+    if not non_empty:
+        return None
+    return max(non_empty, key=lambda item: len(item.get("response", "").strip()))
 
 
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
-    """
-    Stage 1: Collect individual responses from all council models.
-
-    Args:
-        user_query: The user's question
-
-    Returns:
-        List of dicts with 'model' and 'response' keys
-    """
+    """Stage 1: collect candidate responses from all council models."""
     messages = [{"role": "user", "content": user_query}]
+    responses = await provider.query_models_parallel(COUNCIL_MODELS, messages)
 
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-
-    # Format results
     stage1_results = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
-            stage1_results.append({
-                "model": model,
-                "response": response.get('content', '')
-            })
-
+        if response is not None:
+            stage1_results.append(
+                {
+                    "model": model,
+                    "response": response.get("content", ""),
+                    "usage": response.get("usage"),
+                    "latency_ms": response.get("latency_ms"),
+                }
+            )
     return stage1_results
 
 
-async def stage2_collect_rankings(
+async def _stage2_collect_critiques_structured(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Stage 2: Each model ranks the anonymized responses.
-
-    Args:
-        user_query: The original user query
-        stage1_results: Results from Stage 1
-
-    Returns:
-        Tuple of (rankings list, label_to_model mapping)
-    """
-    # Create anonymized labels for responses (Response A, Response B, etc.)
-    labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
-
-    # Create mapping from label to model name
+    """Original stage 2: structured JSON peer critiques over anonymous responses."""
+    labels = [_response_label(i) for i in range(len(stage1_results))]
     label_to_model = {
-        f"Response {label}": result['model']
+        label: result["model"]
         for label, result in zip(labels, stage1_results)
     }
+    responses_text = "\n\n".join(
+        [
+            f"{label}:\n{result['response']}"
+            for label, result in zip(labels, stage1_results)
+        ]
+    )
 
-    # Build the ranking prompt
-    responses_text = "\n\n".join([
-        f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
-    ])
+    critique_prompt = f"""You are reviewing anonymous candidate answers to a user question.
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+Question:
+{user_query}
 
-Question: {user_query}
-
-Here are the responses from different models (anonymized):
-
+Candidate responses:
 {responses_text}
 
-Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
+Return ONLY valid JSON (no markdown, no prose) using this schema:
+{{
+  "critiques": [
+    {{
+      "response_label": "Response A",
+      "strengths": ["..."],
+      "weaknesses": ["..."],
+      "missing_information": ["..."],
+      "unsupported_claims": ["..."],
+      "suggested_improvements": ["..."]
+    }}
+  ]
+}}
 
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
+Requirements:
+- Include one critique entry for every listed response label.
+- Keep each bullet short and concrete.
+- If no unsupported claims are present, return an empty list for unsupported_claims.
+- Do not include model names, votes, or rankings."""
 
-Example of the correct format for your ENTIRE response:
+    messages = [{"role": "user", "content": critique_prompt}]
+    responses = await provider.query_models_parallel(JUDGE_MODELS, messages)
 
-Response A provides good detail on X but misses Y...
-Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
-
-FINAL RANKING:
-1. Response C
-2. Response A
-3. Response B
-
-Now provide your evaluation and ranking:"""
-
-    messages = [{"role": "user", "content": ranking_prompt}]
-
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-
-    # Format results
-    stage2_results = []
+    stage2_results: List[Dict[str, Any]] = []
     for model, response in responses.items():
-        if response is not None:
-            full_text = response.get('content', '')
-            parsed = parse_ranking_from_text(full_text)
-            stage2_results.append({
+        if response is None:
+            continue
+        critique_text = response.get("content", "")
+        stage2_results.append(
+            {
                 "model": model,
-                "ranking": full_text,
-                "parsed_ranking": parsed
-            })
+                "critique": critique_text,
+                "usage": response.get("usage"),
+                "latency_ms": response.get("latency_ms"),
+                "structured_critiques": parse_structured_critiques(
+                    critique_text, labels
+                ),
+            }
+        )
 
     return stage2_results, label_to_model
+
+
+async def _stage2_collect_critiques_lite(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """Lite stage 2: short plain-text critiques, no JSON schema.
+
+    Small local models are unreliable at multi-field JSON output — when they
+    fail the schema the structured path silently drops their critique. This
+    trades structure for reliability and speed, which matters more on
+    limited local hardware.
+    """
+    labels = [_response_label(i) for i in range(len(stage1_results))]
+    label_to_model = {
+        label: result["model"] for label, result in zip(labels, stage1_results)
+    }
+    responses_text = "\n\n".join(
+        f"{label}:\n{result['response']}"
+        for label, result in zip(labels, stage1_results)
+    )
+
+    critique_prompt = f"""Question: {user_query}
+
+Candidate answers:
+{responses_text}
+
+In 3-5 short bullet points total, note the biggest problems across these
+answers: wrong facts, missing information, or unclear parts. Do not restate
+the answers. Do not use JSON. Plain bullet points only, nothing else."""
+
+    messages = [{"role": "user", "content": critique_prompt}]
+    responses = await provider.query_models_parallel(JUDGE_MODELS, messages)
+
+    stage2_results: List[Dict[str, Any]] = []
+    for model, response in responses.items():
+        if response is None:
+            continue
+        stage2_results.append(
+            {
+                "model": model,
+                "critique": response.get("content", ""),
+                "usage": response.get("usage"),
+                "latency_ms": response.get("latency_ms"),
+                "structured_critiques": [],
+            }
+        )
+
+    return stage2_results, label_to_model
+
+
+async def stage2_collect_critiques(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """Stage 2: collect peer critiques over anonymous responses.
+
+    Dispatches to the plain-text ("lite") path or the structured JSON path
+    based on COUNCIL_LITE_MODE.
+    """
+    if COUNCIL_LITE_MODE:
+        return await _stage2_collect_critiques_lite(user_query, stage1_results)
+    return await _stage2_collect_critiques_structured(user_query, stage1_results)
+
+
+async def generate_direct_response(user_query: str) -> Dict[str, Any]:
+    """Direct response path for trivial prompts."""
+    direct_prompt = (
+        "Answer the user directly. Keep it concise, helpful, and natural.\n\n"
+        f"User message: {user_query}"
+    )
+    response = await provider.query_model(
+        CHAIRMAN_MODEL,
+        [{"role": "user", "content": direct_prompt}],
+    )
+    if response is not None and response.get("content", "").strip():
+        return {"model": CHAIRMAN_MODEL, "response": response.get("content", "")}
+
+    stage1_results = await stage1_collect_responses(user_query)
+    fallback = _select_best_existing_response(stage1_results)
+    if fallback is not None:
+        return {
+            "model": fallback.get("model", CHAIRMAN_MODEL),
+            "response": fallback.get("response", ""),
+        }
+    return {"model": CHAIRMAN_MODEL, "response": "Hello! How can I help you today?"}
 
 
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """
-    Stage 3: Chairman synthesizes final response.
+    """Stage 3: synthesize final answer from anonymous responses + peer critiques."""
+    labels = [_response_label(i) for i in range(len(stage1_results))]
+    anonymous_responses = [
+        {
+            "response_label": label,
+            "response": result["response"],
+        }
+        for label, result in zip(labels, stage1_results)
+    ]
 
-    Args:
-        user_query: The original user query
-        stage1_results: Individual model responses from Stage 1
-        stage2_results: Rankings from Stage 2
+    if COUNCIL_LITE_MODE:
+        critique_notes = "\n\n".join(
+            r.get("critique", "").strip()
+            for r in stage2_results
+            if r.get("critique", "").strip()
+        ) or "No specific issues were flagged."
 
-    Returns:
-        Dict with 'model' and 'response' keys
-    """
-    # Build comprehensive context for chairman
-    stage1_text = "\n\n".join([
-        f"Model: {result['model']}\nResponse: {result['response']}"
-        for result in stage1_results
-    ])
+        chairman_prompt = f"""Question: {user_query}
 
-    stage2_text = "\n\n".join([
-        f"Model: {result['model']}\nRanking: {result['ranking']}"
-        for result in stage2_results
-    ])
+Draft answers:
+{json.dumps(anonymous_responses, indent=2)}
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+Notes on problems with the drafts:
+{critique_notes}
 
-Original Question: {user_query}
+Write ONE final answer to the question above. Use the best parts of the
+drafts, fix anything the notes flagged, and leave out anything you're not
+sure is correct. Output only the final answer — nothing about drafts,
+notes, or process."""
+    else:
+        aggregated_critiques = _aggregate_structured_critiques(stage2_results, labels)
+        chairman_prompt = f"""You are producing the final answer for the user.
 
-STAGE 1 - Individual Responses:
-{stage1_text}
+Original user question:
+{user_query}
 
-STAGE 2 - Peer Rankings:
-{stage2_text}
+Anonymous candidate responses (JSON):
+{json.dumps(anonymous_responses, indent=2)}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
+Structured peer critiques (JSON):
+{json.dumps(aggregated_critiques, indent=2)}
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+Rules:
+- Write only the final answer to the user.
+- Do not mention internal process, deliberation, critique, ranking, model names, labels, council, or chairman.
+- Do not mention "Response A/B/C" or any anonymized label.
+- Resolve unsupported claims by removing them or clearly qualifying uncertainty.
+- Merge the strongest ideas and fill missing information where possible."""
 
-    messages = [{"role": "user", "content": chairman_prompt}]
+    response = await provider.query_model(
+        CHAIRMAN_MODEL,
+        [{"role": "user", "content": chairman_prompt}],
+    )
 
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
-
-    if response is None:
-        # Fallback if chairman fails
+    if response is not None and response.get("content", "").strip():
         return {
             "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
+            "response": response.get("content", ""),
+            "usage": response.get("usage"),
+            "latency_ms": response.get("latency_ms"),
         }
 
+    fallback = _select_best_existing_response(stage1_results)
+    if fallback is not None:
+        return {
+            "model": fallback.get("model", CHAIRMAN_MODEL),
+            "response": fallback.get("response", ""),
+        }
     return {
         "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
+        "response": "I’m sorry, I couldn’t generate a complete answer right now.",
     }
 
 
-def parse_ranking_from_text(ranking_text: str) -> List[str]:
-    """
-    Parse the FINAL RANKING section from the model's response.
-
-    Args:
-        ranking_text: The full text response from the model
-
-    Returns:
-        List of response labels in ranked order
-    """
-    import re
-
-    # Look for "FINAL RANKING:" section
-    if "FINAL RANKING:" in ranking_text:
-        # Extract everything after "FINAL RANKING:"
-        parts = ranking_text.split("FINAL RANKING:")
-        if len(parts) >= 2:
-            ranking_section = parts[1]
-            # Try to extract numbered list format (e.g., "1. Response A")
-            # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
-            if numbered_matches:
-                # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
-
-            # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
-            return matches
-
-    # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
-    return matches
-
-
-def calculate_aggregate_rankings(
-    stage2_results: List[Dict[str, Any]],
-    label_to_model: Dict[str, str]
-) -> List[Dict[str, Any]]:
-    """
-    Calculate aggregate rankings across all models.
-
-    Args:
-        stage2_results: Rankings from each model
-        label_to_model: Mapping from anonymous labels to model names
-
-    Returns:
-        List of dicts with model name and average rank, sorted best to worst
-    """
-    from collections import defaultdict
-
-    # Track positions for each model
-    model_positions = defaultdict(list)
-
-    for ranking in stage2_results:
-        ranking_text = ranking['ranking']
-
-        # Parse the ranking from the structured format
-        parsed_ranking = parse_ranking_from_text(ranking_text)
-
-        for position, label in enumerate(parsed_ranking, start=1):
-            if label in label_to_model:
-                model_name = label_to_model[label]
-                model_positions[model_name].append(position)
-
-    # Calculate average position for each model
-    aggregate = []
-    for model, positions in model_positions.items():
-        if positions:
-            avg_rank = sum(positions) / len(positions)
-            aggregate.append({
-                "model": model,
-                "average_rank": round(avg_rank, 2),
-                "rankings_count": len(positions)
-            })
-
-    # Sort by average rank (lower is better)
-    aggregate.sort(key=lambda x: x['average_rank'])
-
-    return aggregate
-
-
 async def generate_conversation_title(user_query: str) -> str:
-    """
-    Generate a short title for a conversation based on the first user message.
-
-    Args:
-        user_query: The first user message
-
-    Returns:
-        A short title (3-5 words)
-    """
+    """Generate a short title for a conversation based on first user message."""
     title_prompt = f"""Generate a very short title (3-5 words maximum) that summarizes the following question.
 The title should be concise and descriptive. Do not use quotes or punctuation in the title.
 
@@ -274,62 +434,95 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
-
+    response = await provider.query_model(TITLE_MODEL, messages, timeout=30.0)
     if response is None:
-        # Fallback to a generic title
         return "New Conversation"
 
-    title = response.get('content', 'New Conversation').strip()
-
-    # Clean up the title - remove quotes, limit length
-    title = title.strip('"\'')
-
-    # Truncate if too long
+    title = response.get("content", "New Conversation").strip().strip('"\'')
     if len(title) > 50:
-        title = title[:47] + "..."
-
+        title = f"{title[:47]}..."
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
-    """
-    Run the complete 3-stage council process.
+async def run_full_council(
+    user_query: str,
+    developer_mode: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    """Run collaborative response pipeline with hidden internal deliberation by default."""
+    metadata: Dict[str, Any] = {
+        "developer_mode": developer_mode,
+        "review_skipped": False,
+        "pipeline": "collaborative-critique",
+        "lite_mode": COUNCIL_LITE_MODE,
+        "provider": provider.name,
+        "models": {
+            "council": COUNCIL_MODELS,
+            "judge": JUDGE_MODELS,
+            "chairman": CHAIRMAN_MODEL,
+        },
+    }
+    effective_query = user_query
+    if RAG_ENABLED:
+        context, retrievals = retrieve_context(
+            user_query,
+            RAG_DOCUMENTS_DIR,
+            RAG_TOP_K,
+            RAG_CHUNK_SIZE,
+            RAG_CHUNK_OVERLAP,
+        )
+        metadata["rag"] = {
+            "enabled": True,
+            "top_k": RAG_TOP_K,
+            "results": retrievals,
+        }
+        if context:
+            effective_query = (
+                f"{user_query}\n\nUse the following retrieved sources when relevant. "
+                "Cite sources as [Source N] and do not invent citations:\n"
+                f"{context}"
+            )
+    else:
+        metadata["rag"] = {"enabled": False, "results": []}
 
-    Args:
-        user_query: The user's question
+    if is_trivial_prompt(user_query):
+        stage3_result = await generate_direct_response(effective_query)
+        metadata["review_skipped"] = True
+        metadata["skip_reason"] = "trivial_prompt"
+        return [], [], stage3_result, metadata
 
-    Returns:
-        Tuple of (stage1_results, stage2_results, stage3_result, metadata)
-    """
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
-
-    # If no models responded successfully, return error
+    stage1_results = await stage1_collect_responses(effective_query)
+    metadata["errors"] = []
+    failed_stage1 = [model for model in COUNCIL_MODELS if model not in {
+        result["model"] for result in stage1_results
+    }]
+    if failed_stage1:
+        metadata["errors"].append({"stage": "stage1", "models": failed_stage1})
     if not stage1_results:
         return [], [], {
             "model": "error",
-            "response": "All models failed to respond. Please try again."
-        }, {}
+            "response": "All models failed to respond. Please try again.",
+        }, metadata
 
-    # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
-
-    # Calculate aggregate rankings
-    aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-
-    # Stage 3: Synthesize final answer
+    stage2_results, label_to_model = await stage2_collect_critiques(
+        effective_query, stage1_results
+    )
+    failed_stage2 = [model for model in JUDGE_MODELS if model not in {
+        result["model"] for result in stage2_results
+    }]
+    if failed_stage2:
+        metadata["errors"].append({"stage": "stage2", "models": failed_stage2})
     stage3_result = await stage3_synthesize_final(
-        user_query,
+        effective_query,
         stage1_results,
-        stage2_results
+        stage2_results,
     )
 
-    # Prepare metadata
-    metadata = {
-        "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
-    }
+    if developer_mode:
+        metadata["label_to_model"] = label_to_model
+        metadata["structured_summary"] = _aggregate_structured_critiques(
+            stage2_results,
+            list(label_to_model.keys()),
+        )
+        return stage1_results, stage2_results, stage3_result, metadata
 
-    return stage1_results, stage2_results, stage3_result, metadata
+    return [], [], stage3_result, metadata

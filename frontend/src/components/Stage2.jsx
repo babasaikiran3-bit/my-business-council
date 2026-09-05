@@ -2,96 +2,87 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './Stage2.css';
 
-function deAnonymizeText(text, labelToModel) {
-  if (!labelToModel) return text;
-
-  let result = text;
-  // Replace each "Response X" with the actual model name
-  Object.entries(labelToModel).forEach(([label, model]) => {
-    const modelShortName = model.split('/')[1] || model;
-    result = result.replace(new RegExp(label, 'g'), `**${modelShortName}**`);
-  });
-  return result;
-}
-
-export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
-  const [activeTab, setActiveTab] = useState(0);
-
-  if (!rankings || rankings.length === 0) {
+function renderCritiqueList(title, items) {
+  if (!items || items.length === 0) {
     return null;
   }
 
   return (
-    <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+    <div className="parsed-ranking">
+      <strong>{title}:</strong>
+      <ul>
+        {items.map((item, index) => (
+          <li key={index}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
-      <h4>Raw Evaluations</h4>
+export default function Stage2({ critiques, labelToModel, structuredSummary }) {
+  const [activeTab, setActiveTab] = useState(0);
+
+  if (!critiques || critiques.length === 0) {
+    return null;
+  }
+
+  const active = critiques[activeTab];
+
+  return (
+    <div className="stage stage2">
+      <h3 className="stage-title">Developer Mode: Structured Peer Critiques</h3>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
-        Below, model names are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
+        Internal critiques are anonymous at synthesis time and shown here only in Developer Mode.
       </p>
 
       <div className="tabs">
-        {rankings.map((rank, index) => (
+        {critiques.map((critique, index) => (
           <button
             key={index}
             className={`tab ${activeTab === index ? 'active' : ''}`}
             onClick={() => setActiveTab(index)}
           >
-            {rank.model.split('/')[1] || rank.model}
+            {critique.model.split('/')[1] || critique.model}
           </button>
         ))}
       </div>
 
       <div className="tab-content">
-        <div className="ranking-model">
-          {rankings[activeTab].model}
-        </div>
+        <div className="ranking-model">{active.model}</div>
         <div className="ranking-content markdown-content">
-          <ReactMarkdown>
-            {deAnonymizeText(rankings[activeTab].ranking, labelToModel)}
-          </ReactMarkdown>
+          <ReactMarkdown>{active.critique || ''}</ReactMarkdown>
         </div>
 
-        {rankings[activeTab].parsed_ranking &&
-         rankings[activeTab].parsed_ranking.length > 0 && (
-          <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
-            <ol>
-              {rankings[activeTab].parsed_ranking.map((label, i) => (
-                <li key={i}>
-                  {labelToModel && labelToModel[label]
-                    ? labelToModel[label].split('/')[1] || labelToModel[label]
-                    : label}
-                </li>
-              ))}
-            </ol>
+        {(active.structured_critiques || []).map((item, idx) => (
+          <div key={idx} className="parsed-ranking">
+            <strong>
+              {item.response_label}
+              {labelToModel?.[item.response_label]
+                ? ` (${labelToModel[item.response_label]})`
+                : ''}
+            </strong>
+            {renderCritiqueList('Strengths', item.strengths)}
+            {renderCritiqueList('Weaknesses', item.weaknesses)}
+            {renderCritiqueList('Missing Information', item.missing_information)}
+            {renderCritiqueList('Unsupported Claims', item.unsupported_claims)}
+            {renderCritiqueList('Suggested Improvements', item.suggested_improvements)}
           </div>
-        )}
+        ))}
       </div>
 
-      {aggregateRankings && aggregateRankings.length > 0 && (
+      {structuredSummary && structuredSummary.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
-          <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
-          </p>
-          <div className="aggregate-list">
-            {aggregateRankings.map((agg, index) => (
-              <div key={index} className="aggregate-item">
-                <span className="rank-position">#{index + 1}</span>
-                <span className="rank-model">
-                  {agg.model.split('/')[1] || agg.model}
-                </span>
-                <span className="rank-score">
-                  Avg: {agg.average_rank.toFixed(2)}
-                </span>
-                <span className="rank-count">
-                  ({agg.rankings_count} votes)
-                </span>
-              </div>
-            ))}
-          </div>
+          <h4>Aggregated Critique Summary</h4>
+          {structuredSummary.map((summary, index) => (
+            <div key={index} className="aggregate-item">
+              <span className="rank-position">{summary.response_label}</span>
+              <span className="rank-count">
+                {labelToModel?.[summary.response_label]
+                  ? labelToModel[summary.response_label]
+                  : ''}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

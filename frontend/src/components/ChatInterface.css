@@ -109,6 +109,19 @@
   background: #fafafa;
 }
 
+.developer-mode-toggle {
+  padding: 12px 24px 0 24px;
+  background: #fafafa;
+  color: #444;
+  font-size: 14px;
+}
+
+.developer-mode-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .message-input {
   flex: 1;
   padding: 14px;

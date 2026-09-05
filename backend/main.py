@@ -10,7 +10,15 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import (
+    run_full_council,
+    generate_conversation_title,
+    stage1_collect_responses,
+    stage2_collect_critiques,
+    stage3_synthesize_final,
+    generate_direct_response,
+    is_trivial_prompt,
+)
 
 app = FastAPI(title="LLM Council API")
 
@@ -32,6 +40,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    developer_mode: bool = False
 
 
 class ConversationMetadata(BaseModel):
@@ -103,7 +112,8 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content,
+        developer_mode=request.developer_mode,
     )
 
     # Add assistant message with all stages
@@ -147,21 +157,47 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            metadata: Dict[str, Any] = {
+                "developer_mode": request.developer_mode,
+                "review_skipped": False,
+                "pipeline": "collaborative-critique",
+            }
 
-            # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            if is_trivial_prompt(request.content):
+                metadata["review_skipped"] = True
+                metadata["skip_reason"] = "trivial_prompt"
+                stage1_results = []
+                stage2_results = []
+                yield f"data: {json.dumps({'type': 'stage2_skipped', 'metadata': metadata})}\n\n"
+                yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+                stage3_result = await generate_direct_response(request.content)
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'metadata': metadata})}\n\n"
+            else:
+                # Stage 1: Collect responses
+                yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+                raw_stage1_results = await stage1_collect_responses(request.content)
+                stage1_results = raw_stage1_results if request.developer_mode else []
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
-            # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+                # Stage 2: Collect critiques
+                yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                raw_stage2_results, label_to_model = await stage2_collect_critiques(
+                    request.content,
+                    raw_stage1_results,
+                )
+                if request.developer_mode:
+                    metadata["label_to_model"] = label_to_model
+                stage2_results = raw_stage2_results if request.developer_mode else []
+                yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': metadata})}\n\n"
+
+                # Stage 3: Synthesize final answer
+                yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+                stage3_result = await stage3_synthesize_final(
+                    request.content,
+                    raw_stage1_results,
+                    raw_stage2_results,
+                )
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'metadata': metadata})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:

@@ -9,18 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
+  const [developerMode, setDeveloperMode] = useState(false);
 
   const loadConversations = async () => {
     try {
@@ -39,6 +28,21 @@ function App() {
       console.error('Failed to load conversation:', error);
     }
   };
+
+  // Load conversations after the callbacks are initialized.
+  useEffect(() => {
+    // This is an intentional initial data load from the API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadConversations();
+  }, []);
+
+  useEffect(() => {
+    if (currentConversationId) {
+      // This is an intentional state sync after selecting a conversation.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadConversation(currentConversationId);
+    }
+  }, [currentConversationId]);
 
   const handleNewConversation = async () => {
     try {
@@ -90,7 +94,7 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(currentConversationId, content, developerMode, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -126,6 +130,19 @@ function App() {
               const lastMsg = messages[messages.length - 1];
               lastMsg.stage2 = event.data;
               lastMsg.metadata = event.metadata;
+              lastMsg.loading.stage2 = false;
+              return { ...prev, messages };
+            });
+            break;
+
+          case 'stage2_skipped':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              lastMsg.stage1 = [];
+              lastMsg.stage2 = [];
+              lastMsg.metadata = event.metadata;
+              lastMsg.loading.stage1 = false;
               lastMsg.loading.stage2 = false;
               return { ...prev, messages };
             });
@@ -193,6 +210,8 @@ function App() {
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        developerMode={developerMode}
+        onToggleDeveloperMode={setDeveloperMode}
       />
     </div>
   );

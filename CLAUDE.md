@@ -4,46 +4,54 @@ This file contains technical details, architectural decisions, and important imp
 
 ## Project Overview
 
-LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
+LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key mechanism is anonymized structured critique in Stage 2, preventing model favoritism and enabling more robust synthesis.
 
 ## Architecture
 
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
+- Contains `PROVIDER` (`openrouter` or `ollama`)
+- Contains `COUNCIL_MODELS` (list of model identifiers for the selected provider)
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Contains provider-specific settings (`OPENROUTER_API_KEY`, `OPENROUTER_API_URL`, `OLLAMA_API_URL`, optional `TITLE_MODEL`)
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
+**`providers/`**
+- `base.py`: `BaseProvider` interface with async `query_model()` and `query_models_parallel()`
+- `openrouter_provider.py`: OpenRouter implementation
+- `ollama_provider.py`: Ollama implementation (supports multiple local models in parallel)
+- `factory.py`: Config-driven provider selection
+
 **`openrouter.py`**
-- `query_model()`: Single async model query
-- `query_models_parallel()`: Parallel queries using `asyncio.gather()`
-- Returns dict with 'content' and optional 'reasoning_details'
-- Graceful degradation: returns None on failure, continues with successful responses
+- Backward-compatible OpenRouter helper module
+- Delegates to `OpenRouterProvider` so existing imports still work
 
 **`council.py`** - The Core Logic
+- Depends on `BaseProvider` via `get_provider()` (not on OpenRouter module directly)
 - `stage1_collect_responses()`: Parallel queries to all council models
-- `stage2_collect_rankings()`:
+- `stage2_collect_critiques()`:
   - Anonymizes responses as "Response A, B, C, etc."
-  - Creates `label_to_model` mapping for de-anonymization
-  - Prompts models to evaluate and rank (with strict format requirements)
-  - Returns tuple: (rankings_list, label_to_model_dict)
-  - Each ranking includes both raw text and `parsed_ranking` list
-- `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
-- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
-- `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+  - Prompts models to return strict JSON critiques with fields:
+    - strengths
+    - weaknesses
+    - missing_information
+    - unsupported_claims
+    - suggested_improvements
+- `stage3_synthesize_final()`: synthesizer receives only anonymous responses + structured critiques (no model names)
+- `is_trivial_prompt()` + `generate_direct_response()`: skip review stage for greetings/trivial prompts
+- `run_full_council(..., developer_mode=False)`: hides internal deliberation by default
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
 - Each conversation: `{id, created_at, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- Note: metadata (developer mode flags, anonymization maps, critique summaries) is NOT persisted to storage, only returned via API
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
 - POST `/api/conversations/{id}/message` returns metadata in addition to stages
-- Metadata includes: label_to_model mapping and aggregate_rankings
+- Metadata includes developer-mode deliberation fields (for example `label_to_model`) and skip flags
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -81,21 +89,12 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 ## Key Design Decisions
 
 ### Stage 2 Prompt Format
-The Stage 2 prompt is very specific to ensure parseable output:
-```
-1. Evaluate each response individually first
-2. Provide "FINAL RANKING:" header
-3. Numbered list format: "1. Response C", "2. Response A", etc.
-4. No additional text after ranking section
-```
-
-This strict format allows reliable parsing while still getting thoughtful evaluations.
+Stage 2 now enforces strict JSON output for structured critiques to support deterministic parsing and future role-based agent pipelines.
 
 ### De-anonymization Strategy
 - Models receive: "Response A", "Response B", etc.
 - Backend creates mapping: `{"Response A": "openai/gpt-5.1", ...}`
-- Frontend displays model names in **bold** for readability
-- Users see explanation that original evaluation used anonymous labels
+- Frontend can display mapping only in Developer Mode
 - This prevents bias while maintaining transparency
 
 ### Error Handling Philosophy
@@ -104,9 +103,8 @@ This strict format allows reliable parsing while still getting thoughtful evalua
 - Log errors but don't expose to user unless all models fail
 
 ### UI/UX Transparency
-- All raw outputs are inspectable via tabs
-- Parsed rankings shown below raw text for validation
-- Users can verify system's interpretation of model outputs
+- Internal outputs are hidden by default for end users
+- Developer Mode reveals raw candidate responses and structured critiques
 - This builds trust and allows debugging of edge cases
 
 ## Important Implementation Details
@@ -123,13 +121,13 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
 
 ### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+Models are configured in `backend/config.py`. Chairman can be same or different from council members. `COUNCIL_MODELS` and `CHAIRMAN_MODEL` are provider-agnostic and can point to OpenRouter IDs or local Ollama model names (e.g. `llama3.3`, `qwen3`, `mistral`, `gemma3`).
 
 ## Common Gotchas
 
 1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
-3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
+3. **Structured Critique Parse Failures**: If models don't follow JSON format, parser falls back gracefully and synthesis still proceeds
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
 
 ## Future Enhancement Ideas
@@ -143,7 +141,9 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 
 ## Testing Notes
 
-Use `test_openrouter.py` to verify API connectivity and test different model identifiers before adding to council. The script tests both streaming and non-streaming modes.
+Use provider-specific smoke tests or API probes to verify connectivity before adding models to council:
+- OpenRouter: validate key and model IDs
+- Ollama: ensure local daemon is running and models are pulled
 
 ## Data Flow Summary
 
