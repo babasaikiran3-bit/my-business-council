@@ -171,6 +171,16 @@ def _select_best_existing_response(stage1_results: List[Dict[str, Any]]) -> Opti
     return max(non_empty, key=lambda item: len(item.get("response", "").strip()))
 
 
+def provider_failure_message() -> str:
+    """Return an actionable message without exposing prompts or credentials."""
+    if provider.name == "ollama":
+        return (
+            "Ollama is unavailable. Start the Ollama app or daemon and verify "
+            "that it is listening at the configured OLLAMA_API_URL."
+        )
+    return "The configured API provider did not return a response. Please try again."
+
+
 async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     """Stage 1: collect candidate responses from all council models."""
     messages = [{"role": "user", "content": user_query}]
@@ -500,7 +510,7 @@ async def run_full_council(
     if not stage1_results:
         return [], [], {
             "model": "error",
-            "response": "All models failed to respond. Please try again.",
+            "response": provider_failure_message(),
         }, metadata
 
     stage2_results, label_to_model = await stage2_collect_critiques(

@@ -80,6 +80,7 @@ function App() {
         stage2: null,
         stage3: null,
         metadata: null,
+        error: null,
         loading: {
           stage1: false,
           stage2: false,
@@ -180,6 +181,18 @@ function App() {
 
           case 'error':
             console.error('Stream error:', event.message);
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg?.role === 'assistant') {
+                messages[messages.length - 1] = {
+                  ...lastMsg,
+                  error: event.message || 'The council could not complete this request.',
+                  loading: { stage1: false, stage2: false, stage3: false },
+                };
+              }
+              return { ...prev, messages };
+            });
             setIsLoading(false);
             break;
 

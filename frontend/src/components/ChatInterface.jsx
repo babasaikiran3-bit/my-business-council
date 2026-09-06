@@ -106,6 +106,11 @@ export default function ChatInterface({
                     </div>
                   )}
                   {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
+                  {msg.error && (
+                    <div className="message-error" role="alert">
+                      {msg.error}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

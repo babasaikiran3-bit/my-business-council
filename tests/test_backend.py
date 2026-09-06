@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from backend.council import run_full_council
+from backend.conversation_context import build_context_messages, format_context_prompt
 from backend.providers.ollama_provider import OllamaProvider
 from backend.providers.openrouter_provider import OpenRouterProvider
 from backend.providers.factory import get_provider
@@ -27,7 +28,7 @@ class FakeResponse:
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
     @patch("backend.providers.ollama_provider.httpx.AsyncClient")
     async def test_ollama_sends_local_options(self, client_type):
-        client = client_type.return_value.__aenter__ = AsyncMock(
+        client_type.return_value.__aenter__ = AsyncMock(
             return_value=client_type.return_value
         )
         client_type.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -84,6 +85,65 @@ class RagTests(unittest.TestCase):
             get_provider("not-a-provider")
 
 
+class ConversationContextTests(unittest.TestCase):
+    def test_empty_history_returns_current_query_unchanged(self):
+        prompt, info = format_context_prompt("first question", [])
+        self.assertEqual(prompt, "first question")
+        self.assertEqual(info, {"messages": 0, "chars": 0})
+
+    def test_only_final_answer_is_included(self):
+        history = [
+            {"role": "user", "content": "Earlier question"},
+            {
+                "role": "assistant",
+                "stage1": [{"response": "private deliberation"}],
+                "stage2": [{"critique": "private critique"}],
+                "stage3": {"model": "chair", "response": "Public final answer"},
+            },
+        ]
+        messages = build_context_messages(history)
+        self.assertEqual(
+            messages,
+            [
+                {"role": "user", "content": "Earlier question"},
+                {"role": "assistant", "content": "Public final answer"},
+            ],
+        )
+        self.assertNotIn("private", str(messages))
+
+    def test_recent_window_and_character_truncation(self):
+        history = [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "stage3": {"response": "old answer"}},
+            {"role": "user", "content": "new question"},
+        ]
+        messages = build_context_messages(history, max_messages=2, max_chars=20)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[-1]["content"], "new question")
+        truncated = build_context_messages(history, max_messages=2, max_chars=8)
+        self.assertEqual(truncated[-1]["content"], "question")
+
+    def test_each_limit_can_be_disabled_independently(self):
+        history = [{"role": "user", "content": "one"}, {"role": "user", "content": "two"}]
+        self.assertEqual(len(build_context_messages(history, max_messages=0, max_chars=100)), 2)
+        self.assertEqual(len(build_context_messages(history, max_messages=2, max_chars=0)), 2)
+
+    def test_malformed_history_is_ignored(self):
+        self.assertEqual(build_context_messages([None, {}, {"role": "assistant"}]), [])
+
+    def test_non_streaming_and_streaming_can_share_same_context_builder(self):
+        history = [
+            {"role": "user", "content": "Remember this"},
+            {"role": "assistant", "stage3": {"response": "A remembered answer"}},
+        ]
+        normal_query, normal_info = format_context_prompt("Follow up", history)
+        stream_query, stream_info = format_context_prompt("Follow up", history)
+        self.assertEqual(normal_query, stream_query)
+        self.assertEqual(normal_info, stream_info)
+        self.assertIn("Remember this", normal_query)
+        self.assertIn("Follow up", normal_query)
+
+
 class CouncilTests(unittest.IsolatedAsyncioTestCase):
     async def test_council_uses_provider_abstraction(self):
         class StubProvider:
@@ -106,6 +166,20 @@ class CouncilTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stage2)
         self.assertTrue(stage3["response"])
         self.assertEqual(metadata["provider"], "stub")
+
+    async def test_council_reports_provider_failure(self):
+        class FailedProvider:
+            name = "ollama"
+
+            async def query_models_parallel(self, models, messages, timeout=None):
+                return {model: None for model in models}
+
+        with patch("backend.council.provider", FailedProvider()):
+            _, _, result, metadata = await run_full_council(
+                "Explain a test", developer_mode=False
+            )
+        self.assertIn("Ollama is unavailable", result["response"])
+        self.assertEqual(metadata["errors"][0]["stage"], "stage1")
 
     async def test_rag_context_reaches_stage_one(self):
         class StubProvider:

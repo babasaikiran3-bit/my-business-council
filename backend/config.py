@@ -104,6 +104,10 @@ RAG_TOP_K = max(1, int(os.getenv("RAG_TOP_K", "3")))
 RAG_CHUNK_SIZE = max(100, int(os.getenv("RAG_CHUNK_SIZE", "800")))
 RAG_CHUNK_OVERLAP = max(0, int(os.getenv("RAG_CHUNK_OVERLAP", "100")))
 
+# Short-term conversation memory limits. Internal deliberation is never included.
+CONTEXT_MAX_MESSAGES = max(0, int(os.getenv("CONTEXT_MAX_MESSAGES", "6")))
+CONTEXT_MAX_CHARS = max(0, int(os.getenv("CONTEXT_MAX_CHARS", "12000")))
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
 
@@ -118,6 +122,10 @@ def validate_configuration() -> None:
         raise ValueError("A chairman model must be configured.")
     if RAG_CHUNK_OVERLAP >= RAG_CHUNK_SIZE:
         raise ValueError("RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE.")
+    if CONTEXT_MAX_MESSAGES < 0 or CONTEXT_MAX_CHARS < 0:
+        raise ValueError("Conversation context limits cannot be negative.")
+    if CONTEXT_MAX_MESSAGES == 0 and CONTEXT_MAX_CHARS == 0:
+        raise ValueError("At least one conversation context limit must be positive.")
     if PROVIDER == "api" and not OPENROUTER_API_KEY:
         raise ValueError(
             "OPENROUTER_API_KEY is required when PROVIDER=api. "

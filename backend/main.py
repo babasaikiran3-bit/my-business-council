@@ -10,6 +10,7 @@ import json
 import asyncio
 
 from . import storage
+from .conversation_context import format_context_prompt
 from .council import (
     run_full_council,
     generate_conversation_title,
@@ -18,6 +19,7 @@ from .council import (
     stage3_synthesize_final,
     generate_direct_response,
     is_trivial_prompt,
+    provider_failure_message,
 )
 
 app = FastAPI(title="LLM Council API")
@@ -100,7 +102,14 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Check if this is the first message
-    is_first_message = len(conversation["messages"]) == 0
+    history = conversation.get("messages", [])
+    if not isinstance(history, list):
+        history = []
+    is_first_message = not history
+    council_query, context_info = format_context_prompt(
+        request.content,
+        history,
+    )
 
     # Add user message
     storage.add_user_message(conversation_id, request.content)
@@ -112,9 +121,10 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content,
+        council_query,
         developer_mode=request.developer_mode,
     )
+    metadata["conversation_context"] = context_info
 
     # Add assistant message with all stages
     storage.add_assistant_message(
@@ -145,7 +155,14 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Check if this is the first message
-    is_first_message = len(conversation["messages"]) == 0
+    history = conversation.get("messages", [])
+    if not isinstance(history, list):
+        history = []
+    is_first_message = not history
+    council_query, context_info = format_context_prompt(
+        request.content,
+        history,
+    )
 
     async def event_generator():
         try:
@@ -161,6 +178,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 "developer_mode": request.developer_mode,
                 "review_skipped": False,
                 "pipeline": "collaborative-critique",
+                "conversation_context": context_info,
             }
 
             if is_trivial_prompt(request.content):
@@ -170,19 +188,28 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 stage2_results = []
                 yield f"data: {json.dumps({'type': 'stage2_skipped', 'metadata': metadata})}\n\n"
                 yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-                stage3_result = await generate_direct_response(request.content)
+                stage3_result = await generate_direct_response(council_query)
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'metadata': metadata})}\n\n"
             else:
                 # Stage 1: Collect responses
                 yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-                raw_stage1_results = await stage1_collect_responses(request.content)
+                raw_stage1_results = await stage1_collect_responses(council_query)
+                if not raw_stage1_results:
+                    metadata["errors"] = [{
+                        "stage": "stage1",
+                        "message": provider_failure_message(),
+                    }]
+                    if title_task:
+                        title_task.cancel()
+                    yield f"data: {json.dumps({'type': 'error', 'message': provider_failure_message(), 'metadata': metadata})}\n\n"
+                    return
                 stage1_results = raw_stage1_results if request.developer_mode else []
                 yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
                 # Stage 2: Collect critiques
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
                 raw_stage2_results, label_to_model = await stage2_collect_critiques(
-                    request.content,
+                    council_query,
                     raw_stage1_results,
                 )
                 if request.developer_mode:
@@ -193,7 +220,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 # Stage 3: Synthesize final answer
                 yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
                 stage3_result = await stage3_synthesize_final(
-                    request.content,
+                    council_query,
                     raw_stage1_results,
                     raw_stage2_results,
                 )

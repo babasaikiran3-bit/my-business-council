@@ -85,6 +85,15 @@
   font-style: italic;
 }
 
+.message-error {
+  margin-top: 12px;
+  padding: 12px;
+  color: #8a1c1c;
+  background: #fff1f1;
+  border: 1px solid #e6a8a8;
+  border-radius: 8px;
+}
+
 .spinner {
   width: 20px;
   height: 20px;

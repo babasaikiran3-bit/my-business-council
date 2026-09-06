@@ -95,6 +95,17 @@ local deterministic lexical embeddings and returns source labels in council
 context. Tune `RAG_TOP_K`, `RAG_CHUNK_SIZE`, and `RAG_CHUNK_OVERLAP`; no vector
 database or external service is required.
 
+### Conversation memory
+
+Each request can include a bounded window of recent public user messages and
+assistant final answers from the same conversation. Internal Stage 1/Stage 2
+developer-mode data is never included. Configure `CONTEXT_MAX_MESSAGES` and
+`CONTEXT_MAX_CHARS` in `.env`; set either limit to `0` to disable that bound.
+The memory strategy is isolated in
+[conversation_context.py](D:/Builds/llm-council/backend/conversation_context.py)
+so summaries or semantic memory can be added later without changing the
+council pipeline.
+
 ### Validation
 
 Run the backend checks with:
